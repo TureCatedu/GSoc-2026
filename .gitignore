@@ -1,0 +1,16 @@
+# --- RUST & CARGO ---
+rust_core/target/
+**/*.rs.bk
+Cargo.lock
+
+# --- RUBY & BUNDLER ---
+*.gem
+.bundle/
+vendor/bundle/
+*.rbc
+
+# --- macOS ---
+.DS_Store
+
+# --- VS CODE ---
+.vscode/
