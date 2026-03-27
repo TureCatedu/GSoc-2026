@@ -1,4 +1,4 @@
-# 🚀 Scarpe-TUI Showcase Demo
+# 🚀 Scarpe-TUI Demo
 
 ## 📖 Overview
 Welcome to the interactive showcase of the **Scarpe-TUI** library! This demo acts as a comprehensive Proof of Concept (PoC) demonstrating how a declarative Ruby GUI DSL (Shoes) can be seamlessly ported to the terminal environment. 
