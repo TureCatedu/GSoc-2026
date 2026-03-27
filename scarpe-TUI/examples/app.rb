@@ -1,47 +1,45 @@
 require_relative '../lib/scarpe_tui'
 
-Scarpe.app(title: "Scarpe-TUI Showcase Completo") do
+Scarpe.app(title: "Scarpe-TUI Full Showcase") do
   
   stack do
-    para "=== BENVENUTO NELLA VETRINA DI SCARPE-TUI ==="
-    para "Questa applicazione racchiude tutto ciò che abbiamo costruito."
-    para "Usa il mouse o il tasto TAB per navigare."
+    para "=== WELCOME TO THE SCARPE-TUI SHOWCASE ==="
+    para "This application encompasses everything we have built so far."
+    para "Use the mouse or the TAB key to navigate."
     para "------------------------------------------------------------"
   end
 
-  para "Come ti chiami?"
-  nome_input = edit_line("")
+  para "What is your name?"
+  name_input = edit_line("")
 
-  para "Qual è il tuo linguaggio di programmazione preferito?"
-  lang_input = edit_line("")
+  para "What is your favorite programming language?"
+  language_input = edit_line("")
 
   para "------------------------------------------------------------"
 
   flow do
-    button "Genera Profilo" do
+    button "Generate Profile" do
 
-      nome = nome_input.text.strip
-      lang = lang_input.text.strip
+      name = name_input.text.strip
+      language = language_input.text.strip
 
-      if nome.empty? || lang.empty?
-        para "--> ERRORE: Compila tutti i campi prima di generare!"
+      if name.empty? || language.empty?
+        para "--> ERROR: Please fill in all fields before generating!"
       else
         para " "
-        para "*** NUOVO PROFILO GENERATO ***"
-        para "Nome Utente: #{nome}"
-        para "Linguaggio  : #{lang}"
-        para "Livello     : Architetto di Interfacce Native"
+        para "*** NEW PROFILE GENERATED ***"
+        para "Username : #{name}"
+        para "Language : #{language}"
+        para "Level    : Native Interface Architect"
         para "******************************"
       end
     end
 
-    button "Spamma Testo (Test Scroll)" do
-
-      para "Hai cliccato lo spam! Aggiungo questa riga per farti scrollare..."
-
+    button "Spam Text (Scroll Test)" do
+      para "You clicked spam! Adding this line to test the scrolling behavior..."
     end
 
-    button "Esci" do
+    button "Quit" do
       quit
     end
   end
