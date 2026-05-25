@@ -1,48 +1,22 @@
+# Require the Scarpe-TUI library, which provides the backend functionality for rendering the Text User Interface (TUI)
 require_relative '../lib/scarpe_tui'
 
-Scarpe.app(title: "Scarpe-TUI Showcase Completo") do
+# Initialize the Scarpe application. The `app` method sets up the TUI environment.
+# The `true` argument specifies whether to use the alternate screen buffer (if supported by the terminal).
+# You can change this to `false` if you want to use the main screen buffer instead.
+# You can also provide a custom title for the application by passing a `title` keyword argument, e.g., `title: "My Custom App"`.
+Scarpe.app(true) do
   
+  # Create a vertical stack container to organize UI elements.
+  # A stack arranges its child elements vertically, one below the other.
   stack do
-    para "=== BENVENUTO NELLA VETRINA DI SCARPE-TUI ==="
-    para "Questa applicazione racchiude tutto ciò che abbiamo costruito."
-    para "Usa il mouse o il tasto TAB per navigare."
-    para "------------------------------------------------------------"
+    para " "
+    # Display a welcome message to the user
+    para "============ WELCOME TO THE SCARPE-TUI SHOWCASE ============"
+    
+    # Provide instructions for exiting the application.
+    para "              Press 'q' or 'Ctrl+C' to exit"
+    para "============================================================"
   end
 
-  para "Come ti chiami?"
-  nome_input = edit_line("")
-
-  para "Qual è il tuo linguaggio di programmazione preferito?"
-  lang_input = edit_line("")
-
-  para "------------------------------------------------------------"
-
-  flow do
-    button "Genera Profilo" do
-
-      nome = nome_input.text.strip
-      lang = lang_input.text.strip
-
-      if nome.empty? || lang.empty?
-        para "--> ERRORE: Compila tutti i campi prima di generare!"
-      else
-        para " "
-        para "*** NUOVO PROFILO GENERATO ***"
-        para "Nome Utente: #{nome}"
-        para "Linguaggio  : #{lang}"
-        para "Livello     : Architetto di Interfacce Native"
-        para "******************************"
-      end
-    end
-
-    button "Spamma Testo (Test Scroll)" do
-
-      para "Hai cliccato lo spam! Aggiungo questa riga per farti scrollare..."
-
-    end
-
-    button "Esci" do
-      quit
-    end
-  end
 end
