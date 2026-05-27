@@ -1,9 +1,11 @@
 use crate::*;
 use crossterm::cursor::MoveTo;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{Clear, ClearType, size};
 use slab::Slab;
 use std::mem::swap;
 use std::io::{stdout, Error, Write};
+
 impl ScarpeTuiContext {
     // Initializes a new Scarpe TUI context
     pub fn new(use_alternate: bool) -> Result<Self, Error> {
@@ -11,7 +13,8 @@ impl ScarpeTuiContext {
         if use_alternate {
             stdout().execute(EnterAlternateScreen)?; // Enter alternate screen buffer
         }
-        
+        stdout().execute(EnableMouseCapture)?;
+
         let (width, height) = size().unwrap_or((80, 24));
 
         Ok(ScarpeTuiContext { 
@@ -22,6 +25,7 @@ impl ScarpeTuiContext {
             next_buffer: Buffer::new(width, height),
             focused_node: None,
             needs_redraw:  true,
+            clicked_button: None,
         })
     }
 
@@ -100,13 +104,14 @@ impl ScarpeTuiContext {
             }
         }
 
-        if let NodeType::EditLine(text) = node_type {
+        // Render editable text fields (EditLine nodes)
+        if let NodeType::EditLine(ref text) = node_type {
             let mut cursor_x = layout.x;
             let cursor_y = layout.y;
             
-            // Disegniamo un prefisso per far capire che è un input
+            // Draw a prefix to indicate input
             self.next_buffer.set_char(cursor_x, cursor_y, '>');
-            cursor_x += 2; // Spazio dopo il >
+            cursor_x += 2; // Space after the '>'
 
             for ch in text.chars() {
                 if cursor_x < layout.x + layout.width {
@@ -114,9 +119,31 @@ impl ScarpeTuiContext {
                     cursor_x += 1;
                 }
             }
-            // Disegniamo un cursore lampeggiante finto (un blocco o underscore)
+            // Draw a fake blinking cursor (underscore)
             if cursor_x < layout.x + layout.width {
                 self.next_buffer.set_char(cursor_x, cursor_y, '_');
+            }
+        }
+
+        // Render button nodes
+        if let NodeType::Button(text) = node_type {
+            let mut cursor_x = layout.x;
+            let cursor_y = layout.y;
+
+            self.next_buffer.set_char(cursor_x, cursor_y, '[');
+            self.next_buffer.set_char(cursor_x + 1, cursor_y, ' ');
+            cursor_x += 2;
+
+            for ch in text.chars() {
+                if cursor_x < layout.x + layout.width - 2 {
+                    self.next_buffer.set_char(cursor_x, cursor_y, ch);
+                    cursor_x += 1;
+                }
+            }
+            
+            if cursor_x < layout.x + layout.width {
+                self.next_buffer.set_char(cursor_x, cursor_y, ' ');
+                self.next_buffer.set_char(cursor_x + 1, cursor_y, ']');
             }
         }
 
@@ -132,6 +159,7 @@ impl ScarpeTuiContext {
             stdout().execute(LeaveAlternateScreen)?; // Leave alternate screen buffer
         }
         disable_raw_mode()?; // Disable raw mode
+        stdout().execute(DisableMouseCapture)?;
         Ok(())
     }
 
@@ -198,13 +226,17 @@ impl ScarpeTuiContext {
                 }
                 computed_height += row_height;
             }
-            NodeType::Text(text) | NodeType::EditLine(text) => {
-                let text_len = text.chars().count() as u16; 
+            NodeType::Text(ref text) | NodeType::EditLine(ref text) | NodeType::Button(ref text) => {
+                let mut text_len = text.chars().count() as u16;
+                
+                if matches!(node_type, NodeType::Button(_)) {
+                    text_len += 4;
+                }
+
                 computed_width = text_len.min(max_width);
-                if computed_width == 0 {
-                    computed_width = 1;
-                } 
+                if computed_width == 0 { computed_width = 1; }
                 computed_height = (text_len as f32 / computed_width as f32).ceil() as u16;
+                if computed_height == 0 { computed_height = 1; }
             }
         }
 

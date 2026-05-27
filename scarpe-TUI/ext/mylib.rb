@@ -13,5 +13,6 @@ module ScarpeTuiBackend
   attach_function :scarpe_tui_append_child, [:pointer, :int, :int], :int
   attach_function :scarpe_tui_poll_events, [:pointer], :int
   attach_function :scarpe_tui_get_text, [:pointer, :int], :pointer
-  attach_function :scarpe_tui_free_string, [:char], :void
+  attach_function :scarpe_tui_free_string, [:uint64], :void
+  attach_function :scarpe_tui_get_clicked_button, [:pointer], :int
 end

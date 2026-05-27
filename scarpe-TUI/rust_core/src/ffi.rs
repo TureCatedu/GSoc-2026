@@ -3,10 +3,11 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::panic::catch_unwind;
 use std::ptr::{self, null_mut};
-// use std::time::Duration;
+use std::time::Duration;
 
-use crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
-use crate::{STATUS_ERR_NULL_PTR, STATUS_ERR_PANIC, STATUS_OK, STATUS_QUIT, STATUS_ERR_INVALID_ID};
+use crossterm::event::Event::Mouse;
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind, poll, read};
+use crate::{STATUS_ERR_NULL_PTR, STATUS_ERR_PANIC, STATUS_OK, STATUS_QUIT, STATUS_ERR_INVALID_ID, STATUS_CLICKED};
 
 // This function creates a new node in the virtual DOM based on the provided type and text content. 
 // It checks for null pointers and handles any panics gracefully, returning appropriate status codes 
@@ -27,12 +28,11 @@ pub extern "C" fn scarpe_tui_create_node(
         let new_id = vacant_entry.key();
 
         let node_type = match node_type_code {
-            
             0 => NodeType::Root,
             1 => NodeType::Stack,
             2 => NodeType::Flow,
             3 => {
-
+                // Extract text content for a Text node, if provided.
                 let text_content = if !text_ptr.is_null() {
                     unsafe { CStr::from_ptr(text_ptr) }
                         .to_string_lossy()
@@ -43,7 +43,7 @@ pub extern "C" fn scarpe_tui_create_node(
                 NodeType::Text(text_content)
             }
             4 => {
-
+                // Extract text content for an EditLine node, if provided.
                 let text_content = if !text_ptr.is_null() {
                     unsafe { CStr::from_ptr(text_ptr) }
                         .to_string_lossy()
@@ -52,12 +52,20 @@ pub extern "C" fn scarpe_tui_create_node(
                     String::new()
                 };
 
+                // Set focus to this EditLine if no other node is focused.
                 if ctx.focused_node.is_none() {
                     ctx.focused_node = Some(new_id);
                 }
                 NodeType::EditLine(text_content)
             }
-            _ => NodeType::Stack, // Default to Stack for unknown types
+            5 => {
+                // Extract text content for a Button node, if provided.
+                let text_content = if !text_ptr.is_null() {
+                    unsafe { std::ffi::CStr::from_ptr(text_ptr) }.to_string_lossy().into_owned()
+                } else { String::new() };
+                NodeType::Button(text_content)
+            }
+            _ => NodeType::Stack, // Default to Stack for unknown types.
         };
 
         if node_type_code == 0 {
@@ -79,10 +87,9 @@ pub extern "C" fn scarpe_tui_create_node(
 }
 
 // This function initializes the TUI context and returns a pointer to it.
+// It ensures that any panics during initialization are caught, returning a null pointer instead of crashing.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_init(use_alternate: bool) -> *mut ScarpeTuiContext {
-    // We use `catch_unwind` to ensure that any panics during initialization are caught,
-    // allowing us to return a null pointer instead of crashing the application.
     let result = catch_unwind(|| match ScarpeTuiContext::new(use_alternate) {
         Ok(ctx) => Box::into_raw(Box::new(ctx)),
         Err(_) => ptr::null_mut(),
@@ -125,14 +132,14 @@ pub extern "C" fn scarpe_tui_free_context(ctx_ptr: *mut ScarpeTuiContext) {
     });
 }
 
-// This function appends a child node to a parent node in the virtual DOM. It checks for null pointers and valid IDs before performing the operation.
+// This function appends a child node to a parent node in the virtual DOM. 
+// It checks for null pointers and valid IDs before performing the operation.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_append_child(
     ctx_ptr: *mut ScarpeTuiContext,
     parent_id: c_int,
     child_id: c_int,
 ) -> c_int {
-
     if ctx_ptr.is_null() {
         return STATUS_ERR_NULL_PTR;
     }
@@ -147,11 +154,9 @@ pub extern "C" fn scarpe_tui_append_child(
         let p_id = parent_id as usize;
         let c_id = child_id as usize;
 
-
         if !ctx.nodes.contains(p_id) || !ctx.nodes.contains(c_id) {
             return STATUS_ERR_INVALID_ID;
         }
-
 
         if let Some(parent) = ctx.nodes.get_mut(p_id) {
             parent.children.push(c_id);
@@ -163,6 +168,8 @@ pub extern "C" fn scarpe_tui_append_child(
     result.unwrap_or(STATUS_ERR_PANIC)
 }
 
+// This function retrieves the text content of a node, specifically for EditLine nodes.
+// It returns a pointer to a C-string, which must be freed later to avoid memory leaks.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_get_text(ctx_ptr: *mut ScarpeTuiContext, node_id: c_int) -> *mut c_char {
     if ctx_ptr.is_null() || node_id < 0 {
@@ -174,7 +181,7 @@ pub extern "C" fn scarpe_tui_get_text(ctx_ptr: *mut ScarpeTuiContext, node_id: c
         
         if let Some(node) = ctx.nodes.get(node_id as usize) {
             if let NodeType::EditLine(ref text) = node.node_type {
-                // Creiamo una C-String e passiamo la proprietà (ownership) fuori da Rust
+                // Create a C-string and pass ownership out of Rust.
                 if let Ok(c_string) = CString::new(text.clone()) {
                     return c_string.into_raw(); 
                 }
@@ -186,6 +193,7 @@ pub extern "C" fn scarpe_tui_get_text(ctx_ptr: *mut ScarpeTuiContext, node_id: c
     result.unwrap_or(null_mut())
 }
 
+// This function frees a C-string that was previously allocated in Rust.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_free_string(s: *mut c_char) {
     if s.is_null() { return; }
@@ -196,7 +204,25 @@ pub extern "C" fn scarpe_tui_free_string(s: *mut c_char) {
     });
 }
 
-// This function polls for terminal events, such as key presses, and returns a status code indicating the result.
+// This function retrieves the ID of the last clicked button, if any.
+// It resets the clicked button state after reading.
+#[no_mangle]
+pub extern "C" fn scarpe_tui_get_clicked_button(ctx_ptr: *mut ScarpeTuiContext) -> c_int {
+    if ctx_ptr.is_null() { return -1; }
+    
+    let result = catch_unwind(|| {
+        let ctx = unsafe { &mut *ctx_ptr };
+        if let Some(id) = ctx.clicked_button.take() {
+            return id as c_int;
+        }
+        -1
+    });
+
+    result.unwrap_or(-1)
+}
+
+// This function polls for terminal events, such as key presses or mouse clicks, and processes them.
+// It updates the application state and returns a status code indicating the result.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_int {
     if ctx_ptr.is_null() {
@@ -207,18 +233,37 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
         let ctx = unsafe { &mut *ctx_ptr };
         let mut quit_requested = false;
         let mut state_changed = false; 
-
-        while let Ok(true) = poll(std::time::Duration::from_millis(0)) {
+        while let Ok(true) = poll(Duration::from_millis(0)) {
             match read() {
                 Ok(Event::Key(key_event)) => {
-                    // Logica di uscita
+                    if key_event.kind != KeyEventKind::Press {
+                        continue;
+                    }
+                    // Handle exit logic.
                     if key_event.code == KeyCode::Esc || 
                        (key_event.modifiers.contains(KeyModifiers::CONTROL) && key_event.code == KeyCode::Char('c')) {
                         quit_requested = true;
                         break; 
                     }
 
-                    // Digitazione
+                    if key_event.code == crossterm::event::KeyCode::Tab {
+                        // Cycle focus between EditLine nodes.
+                        let mut edit_lines = Vec::new();
+                        for (id, node) in ctx.nodes.iter() {
+                            if matches!(node.node_type, NodeType::EditLine(_)) {
+                                edit_lines.push(id);
+                            }
+                        }
+                        if !edit_lines.is_empty() {
+                            let current_idx = edit_lines.iter().position(|&id| Some(id) == ctx.focused_node).unwrap_or(0);
+                            let next_idx = (current_idx + 1) % edit_lines.len();
+                            ctx.focused_node = Some(edit_lines[next_idx]);
+                            state_changed = true; // Invalidate the screen to redraw the cursor.
+                        }
+                        continue; // Move to the next event.
+                    }
+                    
+                    // Handle typing in EditLine nodes.
                     if let Some(focus_id) = ctx.focused_node {
                         if let Some(node) = ctx.nodes.get_mut(focus_id) {
                             if let NodeType::EditLine(ref mut text) = node.node_type {
@@ -235,6 +280,29 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                                     _ => {}
                                 }
                             }
+                        }
+                    }
+                }
+                Ok(Mouse(mouse_event)) => {
+                    if mouse_event.kind == MouseEventKind::Down(MouseButton::Left) {
+                        let mx = mouse_event.column;
+                        let my = mouse_event.row;
+
+                        // Check if a button was clicked based on its layout.
+                        let mut clicked_id = None;
+                        for (id, node) in ctx.nodes.iter() {
+                            if matches!(node.node_type, NodeType::Button(_)) {
+                                let l = node.layout;
+                                if mx >= l.x && mx < l.x + l.width && my >= l.y && my < l.y + l.height {
+                                    clicked_id = Some(id);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if let Some(id) = clicked_id {
+                            ctx.clicked_button = Some(id);
+                            return STATUS_CLICKED; // Notify Ruby about the click event.
                         }
                     }
                 }

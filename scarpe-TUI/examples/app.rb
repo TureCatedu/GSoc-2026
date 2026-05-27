@@ -1,23 +1,44 @@
-# Require the Scarpe-TUI library, which provides the backend functionality for rendering the Text User Interface (TUI)
 require_relative '../lib/scarpe_tui'
 
-# Initialize the Scarpe application. The `app` method sets up the TUI environment.
-# The `true` argument specifies whether to use the alternate screen buffer (if supported by the terminal).
-# You can change this to `false` if you want to use the main screen buffer instead.
-# You can also provide a custom title for the application by passing a `title` keyword argument, e.g., `title: "My Custom App"`.
-Scarpe.app(true) do
+Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
   
-  # Create a vertical stack container to organize UI elements.
-  # A stack arranges its child elements vertically, one below the other.
   stack do
-    para " "
-    # Display a welcome message to the user
-    para "============ WELCOME TO THE SCARPE-TUI SHOWCASE ============"
-    
-    # Provide instructions for exiting the application.
-    para "              Press 'Ctrl+C' or 'Esc' to exit"
-    para "============================================================"
-
+    para "=== GENERATORE DI PROFILI GSoC 2026 ==="
+    para "Compila i campi qui sotto con la tastiera"
+    para "e usa il MOUSE per cliccare i bottoni."
+    para "----------------------------------------"
   end
-  edit_line("")
+
+  para "Come ti chiami?"
+
+  nome_input = edit_line("")
+
+  para "Qual e' il tuo linguaggio preferito?"
+  lang_input = edit_line("")
+
+  para " "
+
+  flow do
+    button "Genera Profilo" do
+
+      nome = nome_input.text.strip
+      linguaggio = lang_input.text.strip
+
+      if nome.empty? || linguaggio.empty?
+        para "-> ERRORE: Compila tutti i campi prima di generare!"
+      else
+        para " "
+        para "*** NUOVO PROFILO GENERATO ***"
+        para "Nome Utente: #{nome}"
+        para "Linguaggio : #{linguaggio}"
+        para "Qualifica  : Architetto di Interfacce Native"
+        para "******************************"
+      end
+    end
+
+    button "Esci" do
+      quit
+    end
+  end
+
 end

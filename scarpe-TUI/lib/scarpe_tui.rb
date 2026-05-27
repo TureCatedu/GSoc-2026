@@ -19,11 +19,13 @@ module Scarpe
   end
 
   class EditLine
+    # Represents an editable text field in the TUI.
     def initialize(app, id)
       @app = app
       @id = id
     end
 
+    # Retrieves the current text from the Rust backend for this EditLine.
     def text
       @app.get_node_text(@id)
     end
@@ -36,6 +38,7 @@ module Scarpe
       @title = title
       @should_quit = false
       @node_stack = [] # Stack to manage the hierarchy of nodes in the virtual DOM.
+      @callbacks = {} # Hash to store callbacks for interactive elements.
 
       # Initialize the TUI context by calling the Rust backend.
       # This sets up the environment for rendering the application's UI.
@@ -44,73 +47,84 @@ module Scarpe
         raise RustPanicError, "Failed to initialize Scarpe-TUI: Rust Core panicked or returned NULL."
       end
 
-      @root_node_id = create_tui_node(0)
+      @root_node_id = create_tui_node(0) # Root node for the virtual DOM.
       @node_stack.push(@root_node_id)
 
       instance_eval(&block) if block_given?
-      @node_stack.pop 
       run_loop
     ensure
       shutdown if @ctx_ptr && !@ctx_ptr.null?
     end
 
-    
+    # Creates a stack container in the TUI. A stack arranges its children vertically.
     def stack(&block)
       stack_id = create_tui_node(1) # Type 1: Stack
       link_tui_nodes(@node_stack.last, stack_id)
-      
+
       @node_stack.push(stack_id)
       instance_eval(&block) if block_given?
       @node_stack.pop
     end
 
+    # Creates a flow container in the TUI. A flow arranges its children horizontally.
     def flow(&block)
       flow_id = create_tui_node(2) # Type 2: Flow
       link_tui_nodes(@node_stack.last, flow_id)
-      
+
       @node_stack.push(flow_id)
       instance_eval(&block) if block_given?
       @node_stack.pop
     end
 
+    # Creates a paragraph of text in the TUI.
     def para(text)
       para_id = create_tui_node(3, text.to_s) # Type 3: Text
       link_tui_nodes(@node_stack.last, para_id)
     end
+
+    # Signals the application to quit.
     def quit
       @should_quit = true
     end
 
+    # Creates an editable text field in the TUI.
     def edit_line(initial_text = "")
-      id = create_tui_node(4, initial_text.to_s) # Tipo 4: EditLine
+      id = create_tui_node(4, initial_text.to_s) # Type 4: EditLine
       link_tui_nodes(@node_stack.last, id)
-      
-      # Restituiamo l'oggetto Proxy invece dell'ID grezzo
-      EditLine.new(self, id) 
+
+      EditLine.new(self, id)
     end
 
-    # 2. La lettura sicura della memoria (Boundary Sicuro)
+    # Creates a button in the TUI. If a block is provided, it is executed when the button is clicked.
+    def button(text, &block)
+      button_id = create_tui_node(5, text.to_s) # Type 5: Button
+      link_tui_nodes(@node_stack.last, button_id)
+
+      # Save the callback block if provided.
+      @callbacks[button_id] = block if block_given?
+    end
+
+    # Retrieves the text of a node from the Rust backend.
+    # Ensures safe memory handling by freeing the allocated string after use.
     def get_node_text(node_id)
-      # Chiediamo a Rust di allocare la stringa
       str_ptr = ScarpeTuiBackend.scarpe_tui_get_text(@ctx_ptr, node_id)
       return "" if str_ptr.null?
 
       begin
-        # FFI::Pointer#read_string clona la C-String nativa in una stringa Ruby
-        ruby_string = str_ptr.read_string 
+        ruby_string = str_ptr.read_string # Clone the native C-string into a Ruby string.
         return ruby_string
       ensure
-        # GARANZIA ANTI-LEAK: Indipendentemente da tutto, ordiniamo a Rust di liberarla!
-        ScarpeTuiBackend.scarpe_tui_free_string(str_ptr)
+        # Ensure memory is freed in Rust to prevent leaks.
+        ScarpeTuiBackend.scarpe_tui_free_string(str_ptr.address)
       end
     end
 
     # Helper method to create a new TUI node by calling the Rust backend.
     def create_tui_node(type_code, text = nil)
-      # type_code: 0 = Root, 1 = Stack, 2 = Flow, 3 = Text
+      # type_code: 0 = Root, 1 = Stack, 2 = Flow, 3 = Text, 4 = EditLine, 5 = Button
       result = ScarpeTuiBackend.scarpe_tui_create_node(@ctx_ptr, type_code, text)
       handle_rust_status!(result)
-      result 
+      result
     end
 
     # Helper method to link a child node to a parent node in the TUI hierarchy by calling the Rust backend.
@@ -123,27 +137,28 @@ module Scarpe
     def run_loop
       loop do
         break if @should_quit
-    
-        # 
-        status_code = ScarpeTuiBackend.scarpe_tui_render(@ctx_ptr)
-        handle_rust_status!(status_code)
-    
 
         event_code = ScarpeTuiBackend.scarpe_tui_poll_events(@ctx_ptr)
-        handle_rust_status!(event_code)
-        
-        if event_code == 1 
+
+        if event_code == 1 # STATUS_QUIT
           quit
+        elsif event_code == 2 # STATUS_CLICKED
+          handle_click!
+        else
+          handle_rust_status!(event_code)
         end
-    
-        sleep(0.005) # Sleep for ~16ms to target ~60 FPS and reduce CPU usage. Adjust as needed for performance.
+
+        status_code = ScarpeTuiBackend.scarpe_tui_render(@ctx_ptr)
+        handle_rust_status!(status_code)
+
+        sleep(0.005) # Small delay to prevent high CPU usage.
       end
     end
 
-    # Helper method to handle status codes returned by the Rust backend. 
+    # Helper method to handle status codes returned by the Rust backend.
     # If the code is negative, it raises an appropriate error based on the specific code.
     def handle_rust_status!(code)
-      return if code >= 0 
+      return if code >= 0
 
       case code
       when -1
@@ -159,9 +174,22 @@ module Scarpe
       end
     end
 
+    private
+
+    # Handles button click events by retrieving the clicked button ID from Rust
+    # and executing the associated callback block if it exists.
+    def handle_click!
+      clicked_id = ScarpeTuiBackend.scarpe_tui_get_clicked_button(@ctx_ptr)
+      return if clicked_id < 0
+
+      callback = @callbacks[clicked_id]
+      instance_eval(&callback) if callback
+    end
+
+    # Frees the TUI context in the Rust backend to release resources.
     def shutdown
       ScarpeTuiBackend.scarpe_tui_free_context(@ctx_ptr)
-      @ctx_ptr = nil 
+      @ctx_ptr = nil
     end
   end
 end
