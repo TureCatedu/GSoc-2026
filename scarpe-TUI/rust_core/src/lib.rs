@@ -1,10 +1,10 @@
 mod context;
 mod ffi;
 
-use std::io::{stdout, Error, Write};
+// use std::io::{stdout, Error, Write};
 use std::os::raw::c_int;
 
-use crossterm::{cursor, style::Print, QueueableCommand};
+use crossterm::{style::Print, QueueableCommand};
 use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
@@ -29,6 +29,7 @@ pub enum NodeType {
     Stack,
     Flow,
     Text(String), // Represents a text node with a string value
+    EditLine(String), // Represents an editable line with a string value
 }
 
 // Struct representing the computed layout of a node
@@ -55,6 +56,8 @@ pub struct ScarpeTuiContext {
     pub root_id: Option<NodeId>, // ID of the root node
     pub current_buffer: Buffer, 
     pub next_buffer: Buffer, 
+    pub focused_node: Option<NodeId>, // ID of the currently focused node
+    pub needs_redraw: bool, // Flag indicating whether a redraw is needed
 }
 
 // Represents a single cell in the rendering buffer

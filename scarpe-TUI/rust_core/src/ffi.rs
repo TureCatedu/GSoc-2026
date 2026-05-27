@@ -1,9 +1,9 @@
 use crate::*;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::panic::catch_unwind;
-use std::ptr;
-use std::time::Duration;
+use std::ptr::{self, null_mut};
+// use std::time::Duration;
 
 use crossterm::event::{poll, read, Event, KeyCode, KeyModifiers};
 use crate::{STATUS_ERR_NULL_PTR, STATUS_ERR_PANIC, STATUS_OK, STATUS_QUIT, STATUS_ERR_INVALID_ID};
@@ -23,9 +23,11 @@ pub extern "C" fn scarpe_tui_create_node(
 
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
-
+        let vacant_entry = ctx.nodes.vacant_entry();
+        let new_id = vacant_entry.key();
 
         let node_type = match node_type_code {
+            
             0 => NodeType::Root,
             1 => NodeType::Stack,
             2 => NodeType::Flow,
@@ -40,11 +42,23 @@ pub extern "C" fn scarpe_tui_create_node(
                 };
                 NodeType::Text(text_content)
             }
-            _ => NodeType::Stack, 
-        };
+            4 => {
 
-        let vacant_entry = ctx.nodes.vacant_entry();
-        let new_id = vacant_entry.key();
+                let text_content = if !text_ptr.is_null() {
+                    unsafe { CStr::from_ptr(text_ptr) }
+                        .to_string_lossy()
+                        .into_owned()
+                } else {
+                    String::new()
+                };
+
+                if ctx.focused_node.is_none() {
+                    ctx.focused_node = Some(new_id);
+                }
+                NodeType::EditLine(text_content)
+            }
+            _ => NodeType::Stack, // Default to Stack for unknown types
+        };
 
         if node_type_code == 0 {
             ctx.root_id = Some(new_id);
@@ -57,6 +71,7 @@ pub extern "C" fn scarpe_tui_create_node(
             layout: ComputedLayout::default(), 
         });
 
+        ctx.needs_redraw = true;
         new_id as c_int
     });
 
@@ -140,12 +155,45 @@ pub extern "C" fn scarpe_tui_append_child(
 
         if let Some(parent) = ctx.nodes.get_mut(p_id) {
             parent.children.push(c_id);
+            ctx.needs_redraw = true; 
         }
-
         STATUS_OK
     });
 
     result.unwrap_or(STATUS_ERR_PANIC)
+}
+
+#[no_mangle]
+pub extern "C" fn scarpe_tui_get_text(ctx_ptr: *mut ScarpeTuiContext, node_id: c_int) -> *mut c_char {
+    if ctx_ptr.is_null() || node_id < 0 {
+        return null_mut();
+    }
+    
+    let result = catch_unwind(|| {
+        let ctx = unsafe { &mut *ctx_ptr };
+        
+        if let Some(node) = ctx.nodes.get(node_id as usize) {
+            if let NodeType::EditLine(ref text) = node.node_type {
+                // Creiamo una C-String e passiamo la proprietà (ownership) fuori da Rust
+                if let Ok(c_string) = CString::new(text.clone()) {
+                    return c_string.into_raw(); 
+                }
+            }
+        }
+        null_mut()
+    });
+
+    result.unwrap_or(null_mut())
+}
+
+#[no_mangle]
+pub extern "C" fn scarpe_tui_free_string(s: *mut c_char) {
+    if s.is_null() { return; }
+    let _ = catch_unwind(|| {
+        unsafe {
+            let _ = CString::from_raw(s); 
+        }
+    });
 }
 
 // This function polls for terminal events, such as key presses, and returns a status code indicating the result.
@@ -156,19 +204,52 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
     }
 
     let result = catch_unwind(|| {
+        let ctx = unsafe { &mut *ctx_ptr };
+        let mut quit_requested = false;
+        let mut state_changed = false; 
 
-        if let Ok(true) = poll(Duration::from_millis(0)) {
-            if let Ok(Event::Key(key_event)) = read() {
+        while let Ok(true) = poll(std::time::Duration::from_millis(0)) {
+            match read() {
+                Ok(Event::Key(key_event)) => {
+                    // Logica di uscita
+                    if key_event.code == KeyCode::Esc || 
+                       (key_event.modifiers.contains(KeyModifiers::CONTROL) && key_event.code == KeyCode::Char('c')) {
+                        quit_requested = true;
+                        break; 
+                    }
 
-                if key_event.code == KeyCode::Char('q')
-                    || (key_event.modifiers.contains(KeyModifiers::CONTROL)
-                        && key_event.code == KeyCode::Char('c'))
-                {
-                    return STATUS_QUIT; 
+                    // Digitazione
+                    if let Some(focus_id) = ctx.focused_node {
+                        if let Some(node) = ctx.nodes.get_mut(focus_id) {
+                            if let NodeType::EditLine(ref mut text) = node.node_type {
+                                match key_event.code {
+                                    KeyCode::Char(c) if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT => {
+                                        text.push(c);
+                                        state_changed = true;
+                                    }
+                                    KeyCode::Backspace => {
+                                        if text.pop().is_some() {
+                                            state_changed = true; 
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
                 }
+                Ok(Event::Resize(_, _)) => {
+                    state_changed = true;
+                }
+                _ => {}
             }
         }
-        STATUS_OK
+        
+        if state_changed {
+            ctx.needs_redraw = true;
+        }
+
+        if quit_requested { STATUS_QUIT } else { STATUS_OK }
     });
 
     result.unwrap_or(STATUS_ERR_PANIC)

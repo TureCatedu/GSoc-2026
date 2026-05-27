@@ -1,15 +1,18 @@
 use crate::*;
+use crossterm::cursor::MoveTo;
+use crossterm::terminal::{Clear, ClearType, size};
 use slab::Slab;
-
+use std::mem::swap;
+use std::io::{stdout, Error, Write};
 impl ScarpeTuiContext {
     // Initializes a new Scarpe TUI context
-    pub fn new(use_alternate: bool) -> Result<Self, std::io::Error> {
+    pub fn new(use_alternate: bool) -> Result<Self, Error> {
         enable_raw_mode()?; // Enable raw mode for terminal input
         if use_alternate {
             stdout().execute(EnterAlternateScreen)?; // Enter alternate screen buffer
         }
         
-        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        let (width, height) = size().unwrap_or((80, 24));
 
         Ok(ScarpeTuiContext { 
             use_alternate,
@@ -17,18 +20,25 @@ impl ScarpeTuiContext {
             root_id: None,
             current_buffer: Buffer::new(width, height),
             next_buffer: Buffer::new(width, height),
+            focused_node: None,
+            needs_redraw:  true,
         })
     }
 
     // Renders the current state of the virtual DOM to the terminal
-    pub fn render(&mut self) -> Result<(), std::io::Error> {
-        let (term_width, term_height) = crossterm::terminal::size().unwrap_or((80, 24));
+    pub fn render(&mut self) -> Result<(), Error> {
+
+        if !self.needs_redraw {
+            return Ok(());
+        }
+
+        let (term_width, term_height) = size().unwrap_or((80, 24));
 
         // Resize buffers if terminal size has changed
         if self.next_buffer.width != term_width || self.next_buffer.height != term_height {
             self.next_buffer = Buffer::new(term_width, term_height);
             self.current_buffer = Buffer::new(term_width, term_height);
-            stdout().execute(crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;
+            stdout().execute(Clear(ClearType::All))?;
         }
 
         self.next_buffer.reset(); 
@@ -48,7 +58,7 @@ impl ScarpeTuiContext {
                 let current_cell = &self.current_buffer.content[index];
 
                 if next_cell != current_cell {
-                    out.queue(cursor::MoveTo(x, y))?;
+                    out.queue(MoveTo(x, y))?;
                     out.queue(Print(next_cell.ch))?;
                 }
             }
@@ -56,8 +66,9 @@ impl ScarpeTuiContext {
         
         out.flush()?; // Flush all queued commands to the terminal
 
-        std::mem::swap(&mut self.current_buffer, &mut self.next_buffer); // Swap buffers
+        swap(&mut self.current_buffer, &mut self.next_buffer); // Swap buffers
 
+        self.needs_redraw = false; // Reset redraw flag
         Ok(())
     }
 
@@ -72,7 +83,7 @@ impl ScarpeTuiContext {
         };
 
         // Render text nodes
-        if let NodeType::Text(text) = node_type {
+        if let NodeType::Text(ref text) = node_type {
             let mut cursor_x = layout.x;
             let mut cursor_y = layout.y;
 
@@ -86,6 +97,26 @@ impl ScarpeTuiContext {
                 }
                 self.next_buffer.set_char(cursor_x, cursor_y, ch);
                 cursor_x += 1;
+            }
+        }
+
+        if let NodeType::EditLine(text) = node_type {
+            let mut cursor_x = layout.x;
+            let cursor_y = layout.y;
+            
+            // Disegniamo un prefisso per far capire che è un input
+            self.next_buffer.set_char(cursor_x, cursor_y, '>');
+            cursor_x += 2; // Spazio dopo il >
+
+            for ch in text.chars() {
+                if cursor_x < layout.x + layout.width {
+                    self.next_buffer.set_char(cursor_x, cursor_y, ch);
+                    cursor_x += 1;
+                }
+            }
+            // Disegniamo un cursore lampeggiante finto (un blocco o underscore)
+            if cursor_x < layout.x + layout.width {
+                self.next_buffer.set_char(cursor_x, cursor_y, '_');
             }
         }
 
@@ -106,7 +137,7 @@ impl ScarpeTuiContext {
 
     // Computes layouts for all nodes in the virtual DOM
     pub fn compute_layouts(&mut self) {
-        let (term_width, _term_height) = crossterm::terminal::size().unwrap_or((80, 24));
+        let (term_width, _term_height) = size().unwrap_or((80, 24));
 
         if let Some(root_id) = self.root_id {
             self.layout_node(root_id, 0, 0, term_width);
@@ -167,7 +198,7 @@ impl ScarpeTuiContext {
                 }
                 computed_height += row_height;
             }
-            NodeType::Text(text) => {
+            NodeType::Text(text) | NodeType::EditLine(text) => {
                 let text_len = text.chars().count() as u16; 
                 computed_width = text_len.min(max_width);
                 if computed_width == 0 {

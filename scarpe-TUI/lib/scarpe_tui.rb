@@ -18,6 +18,17 @@ module Scarpe
     App.new(title, use_alternate: use_alternate, &block)
   end
 
+  class EditLine
+    def initialize(app, id)
+      @app = app
+      @id = id
+    end
+
+    def text
+      @app.get_node_text(@id)
+    end
+  end
+
   class App
     # Initializes the Scarpe application and sets up the TUI context.
     # This includes creating the root node for the virtual DOM and evaluating the UI block.
@@ -70,7 +81,29 @@ module Scarpe
       @should_quit = true
     end
 
-    private
+    def edit_line(initial_text = "")
+      id = create_tui_node(4, initial_text.to_s) # Tipo 4: EditLine
+      link_tui_nodes(@node_stack.last, id)
+      
+      # Restituiamo l'oggetto Proxy invece dell'ID grezzo
+      EditLine.new(self, id) 
+    end
+
+    # 2. La lettura sicura della memoria (Boundary Sicuro)
+    def get_node_text(node_id)
+      # Chiediamo a Rust di allocare la stringa
+      str_ptr = ScarpeTuiBackend.scarpe_tui_get_text(@ctx_ptr, node_id)
+      return "" if str_ptr.null?
+
+      begin
+        # FFI::Pointer#read_string clona la C-String nativa in una stringa Ruby
+        ruby_string = str_ptr.read_string 
+        return ruby_string
+      ensure
+        # GARANZIA ANTI-LEAK: Indipendentemente da tutto, ordiniamo a Rust di liberarla!
+        ScarpeTuiBackend.scarpe_tui_free_string(str_ptr)
+      end
+    end
 
     # Helper method to create a new TUI node by calling the Rust backend.
     def create_tui_node(type_code, text = nil)
@@ -103,7 +136,7 @@ module Scarpe
           quit
         end
     
-        sleep(0.016) # Sleep for ~16ms to target ~60 FPS and reduce CPU usage. Adjust as needed for performance.
+        sleep(0.005) # Sleep for ~16ms to target ~60 FPS and reduce CPU usage. Adjust as needed for performance.
       end
     end
 

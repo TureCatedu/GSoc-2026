@@ -15,8 +15,9 @@ Scarpe.app(true) do
     para "============ WELCOME TO THE SCARPE-TUI SHOWCASE ============"
     
     # Provide instructions for exiting the application.
-    para "              Press 'q' or 'Ctrl+C' to exit"
+    para "              Press 'Ctrl+C' or 'Esc' to exit"
     para "============================================================"
-  end
 
+  end
+  edit_line("")
 end
