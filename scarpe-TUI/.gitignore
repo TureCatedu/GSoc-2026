@@ -29,6 +29,8 @@ Makefile.bak
 
 # --- RUST & CARGO ---
 rust_core/target/
+rust_core/target/debug/deps
+rust_core/target/debug/incremental
 **/*.rs.bk
 Cargo.lock
 
