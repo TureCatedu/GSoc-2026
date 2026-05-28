@@ -150,8 +150,8 @@ module Scarpe
 
         status_code = ScarpeTuiBackend.scarpe_tui_render(@ctx_ptr)
         handle_rust_status!(status_code)
-
-        sleep(0.005) # Small delay to prevent high CPU usage.
+        
+        sleep(0.005) 
       end
     end
 

@@ -4,7 +4,6 @@ use std::os::raw::{c_char, c_int};
 use std::panic::catch_unwind;
 use std::ptr::{self, null_mut};
 use std::time::Duration;
-
 use crossterm::event::Event::Mouse;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind, poll, read};
 use crate::{STATUS_ERR_NULL_PTR, STATUS_ERR_PANIC, STATUS_OK, STATUS_QUIT, STATUS_ERR_INVALID_ID, STATUS_CLICKED};
@@ -247,20 +246,23 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                     }
 
                     if key_event.code == crossterm::event::KeyCode::Tab {
-                        // Cycle focus between EditLine nodes.
+                        // Collect all EditLine node IDs
                         let mut edit_lines = Vec::new();
                         for (id, node) in ctx.nodes.iter() {
                             if matches!(node.node_type, NodeType::EditLine(_)) {
                                 edit_lines.push(id);
                             }
                         }
+                        
+                        // Pass focus to the next EditLine in the array
                         if !edit_lines.is_empty() {
                             let current_idx = edit_lines.iter().position(|&id| Some(id) == ctx.focused_node).unwrap_or(0);
                             let next_idx = (current_idx + 1) % edit_lines.len();
                             ctx.focused_node = Some(edit_lines[next_idx]);
-                            state_changed = true; // Invalidate the screen to redraw the cursor.
+                            
+                            state_changed = true; // Signal the render to redraw
                         }
-                        continue; // Move to the next event.
+                        continue; 
                     }
                     
                     // Handle typing in EditLine nodes.

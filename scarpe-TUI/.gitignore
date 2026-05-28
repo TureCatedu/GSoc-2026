@@ -1,0 +1,28 @@
+# Ignore object files and compiled binaries
+*.o
+*.out
+*.a
+*.so
+*.exe
+
+# Ignore dependency files
+*.d
+
+# Ignore build directories
+/build/
+/bin/
+/obj/
+/lib/
+
+# Ignore editor/IDE temporary files
+*.swp
+*.swo
+*~
+*.tmp
+*.log
+
+# Ignore core dumps
+core
+
+# Ignore Makefile-specific temporary files
+Makefile.bak

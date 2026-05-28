@@ -1,5 +1,5 @@
 use crate::*;
-use crossterm::cursor::MoveTo;
+use crossterm::cursor::{MoveTo, Show};
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{Clear, ClearType, size};
 use slab::Slab;
@@ -14,7 +14,6 @@ impl ScarpeTuiContext {
             stdout().execute(EnterAlternateScreen)?; // Enter alternate screen buffer
         }
         stdout().execute(EnableMouseCapture)?;
-
         let (width, height) = size().unwrap_or((80, 24));
 
         Ok(ScarpeTuiContext { 
@@ -108,20 +107,24 @@ impl ScarpeTuiContext {
         if let NodeType::EditLine(ref text) = node_type {
             let mut cursor_x = layout.x;
             let cursor_y = layout.y;
-            
-            // Draw a prefix to indicate input
-            self.next_buffer.set_char(cursor_x, cursor_y, '>');
-            cursor_x += 2; // Space after the '>'
+            let max_x = layout.x + layout.width;
+
+            if cursor_x < max_x { 
+                self.next_buffer.set_char(cursor_x, cursor_y, '>'); // Prefix for EditLine
+            }
+            cursor_x += 2; 
 
             for ch in text.chars() {
-                if cursor_x < layout.x + layout.width {
+                if cursor_x < max_x {
                     self.next_buffer.set_char(cursor_x, cursor_y, ch);
                     cursor_x += 1;
                 }
             }
-            // Draw a fake blinking cursor (underscore)
-            if cursor_x < layout.x + layout.width {
-                self.next_buffer.set_char(cursor_x, cursor_y, '_');
+
+            if Some(id) == self.focused_node {
+                // Move the cursor to the current position for the focused EditLine
+                let _ = stdout().execute(MoveTo(cursor_x, cursor_y));
+                let _ = stdout().execute(Show); // Show the cursor
             }
         }
 
@@ -129,8 +132,7 @@ impl ScarpeTuiContext {
         if let NodeType::Button(text) = node_type {
             let mut cursor_x = layout.x;
             let cursor_y = layout.y;
-
-            self.next_buffer.set_char(cursor_x, cursor_y, '[');
+            self.next_buffer.set_char(cursor_x, cursor_y, '['); // Start of button
             self.next_buffer.set_char(cursor_x + 1, cursor_y, ' ');
             cursor_x += 2;
 
@@ -143,7 +145,7 @@ impl ScarpeTuiContext {
             
             if cursor_x < layout.x + layout.width {
                 self.next_buffer.set_char(cursor_x, cursor_y, ' ');
-                self.next_buffer.set_char(cursor_x + 1, cursor_y, ']');
+                self.next_buffer.set_char(cursor_x + 1, cursor_y, ']'); // End of button
             }
         }
 
@@ -230,7 +232,11 @@ impl ScarpeTuiContext {
                 let mut text_len = text.chars().count() as u16;
                 
                 if matches!(node_type, NodeType::Button(_)) {
-                    text_len += 4;
+                    text_len += 4; // Account for button brackets
+                }
+
+                if matches!(node_type, NodeType::EditLine(_)) {
+                    text_len += 3; // Account for EditLine prefix
                 }
 
                 computed_width = text_len.min(max_width);
