@@ -44,9 +44,10 @@ flycheck*/
 .flycheck*/
 
 # Ignore Rust-specific files
-/target/ # Cargo build directory
-**/Cargo.lock # Lock file for dependencies (if not tracked)
-/*.rs.bk # Backup files for Rust source code
+target/
+**/target/
+**/Cargo.lock 
+/*.rs.bk 
 
 # Ignore Node.js files (if applicable)
 /node_modules/
@@ -76,3 +77,5 @@ Desktop.ini
 
 # Ignore Linux system files
 *~
+
+*.dylib
