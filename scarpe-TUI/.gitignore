@@ -13,6 +13,7 @@
 /bin/
 /obj/
 /lib/
+/target/ # Rust build directory
 
 # Ignore editor/IDE temporary files
 *.swp
@@ -20,28 +21,58 @@
 *~
 *.tmp
 *.log
+cargo-crash.log
+.idea/ # IntelliJ IDEA project files
+.vscode/ # VS Code project files
+*.iml
 
 # Ignore core dumps
 core
 
-# Ignore Makefile-specific temporary files
-Makefile.bak
+# Ignore deleted files
+*.delete
 
-# --- RUST & CARGO ---
-rust_core/target/
-rust_core/target/debug/deps
-rust_core/target/debug/incremental
-**/*.rs.bk
-Cargo.lock
+# Ignore JSON files
+*.json
 
-# --- RUBY & BUNDLER ---
-*.gem
-.bundle/
-vendor/bundle/
-*.rbc
-
-# --- macOS ---
+# Ignore other common temporary or system files
 .DS_Store
+Thumbs.db
 
-# --- VS CODE ---
-.vscode/
+# Ignore Flycheck files
+flycheck*/
+.flycheck*/
+
+# Ignore Rust-specific files
+/target/ # Cargo build directory
+**/Cargo.lock # Lock file for dependencies (if not tracked)
+/*.rs.bk # Backup files for Rust source code
+
+# Ignore Node.js files (if applicable)
+/node_modules/
+/npm-debug.log*
+/yarn-error.log*
+
+# Ignore Python virtual environments (if applicable)
+/venv/
+/.env
+*.pyc
+__pycache__/
+
+# Ignore logs and temporary files
+*.log
+*.bak
+*.tmp
+
+# Ignore macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Ignore Windows system files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Ignore Linux system files
+*~
