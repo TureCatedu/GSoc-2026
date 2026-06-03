@@ -114,9 +114,11 @@ module Scarpe
     end
 
     # Creates an editable text field in the TUI.
-    def edit_line(initial_text = "")
+    def edit_line(initial_text = "", stroke: nil, fill: nil, modifier: nil)
       id = create_tui_node(4, initial_text.to_s) # Type 4: EditLine
       link_tui_nodes(@node_stack.last, id)
+
+      apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
 
       EditLine.new(self, id)
     end
@@ -131,13 +133,14 @@ module Scarpe
       @callbacks[button_id] = block if block_given?
     end
 
-    def checkbox(*args, &block)
+    def checkbox(*args, stroke: nil, fill: nil, modifier: nil)
 
       text = args.first.is_a?(String) ? args.first : nil
       
       id = create_tui_node(6, text) # Tipo 6: Checkbox
       link_tui_nodes(@node_stack.last, id)
-     
+      
+      apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
       @callbacks[id] = block if block_given?
       
       Checkbox.new(self, id)

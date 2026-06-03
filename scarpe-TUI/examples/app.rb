@@ -10,24 +10,24 @@ Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
   end
 
   para "Come ti chiami?"
-  nome_input = edit_line("")
+  nome_input = edit_line("", stroke: "dark_yellow")
 
   para "Qual e' il tuo linguaggio preferito?"
-  lang_input = edit_line("")
+  lang_input = edit_line("", stroke: "dark_yellow")
 
   para " "
 
   termini_checkbox = nil 
   
   flow do
-    termini_checkbox = checkbox
+    termini_checkbox = checkbox stroke: "magenta"
     para " Accetto i termini e condizioni"
   end
 
   para " "
 
   flow do
-    button "Genera Profilo" do
+    button "Genera Profilo", stroke: "dark_green" do
       
       nome = nome_input.text.strip
       linguaggio = lang_input.text.strip
