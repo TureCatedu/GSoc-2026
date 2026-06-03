@@ -64,6 +64,7 @@ pub extern "C" fn scarpe_tui_create_node(
                 } else { String::new() };
                 NodeType::Button(text_content)
             }
+            6 => NodeType::Checkbox(false),
             _ => NodeType::Stack, // Default to Stack for unknown types.
         };
 
@@ -75,7 +76,8 @@ pub extern "C" fn scarpe_tui_create_node(
             id: new_id,
             node_type,
             children: Vec::new(),
-            layout: ComputedLayout::default(), 
+            layout: ComputedLayout::default(),
+            style: NodeStyle::default(), 
         });
 
         ctx.needs_redraw = true;
@@ -219,6 +221,73 @@ pub extern "C" fn scarpe_tui_get_clicked_button(ctx_ptr: *mut ScarpeTuiContext) 
 
     result.unwrap_or(-1)
 }
+#[no_mangle]
+pub extern "C" fn scarpe_tui_get_checkbox_state(ctx_ptr: *mut ScarpeTuiContext, node_id: c_int) -> c_int {
+    if ctx_ptr.is_null() || node_id < 0 {
+        return -1;
+    }
+    
+    let result = catch_unwind(|| {
+        let ctx = unsafe { &mut *ctx_ptr };
+        if let Some(node) = ctx.nodes.get(node_id as usize) {
+            if let NodeType::Checkbox(state) = node.node_type {
+                return if state { 1 } else { 0 };
+            }
+        }
+        -1
+    });
+
+    result.unwrap_or(-1)
+}
+
+// This function sets the style of a node, including foreground color, background color, and text modifiers.
+#[no_mangle]
+pub extern "C" fn scarpe_tui_set_style(
+    ctx_ptr: *mut ScarpeTuiContext,
+    node_id: c_int,
+    fg: c_int,
+    bg: c_int,
+    modifier: c_int,
+) -> c_int {
+    if ctx_ptr.is_null() || node_id < 0 {
+        return STATUS_ERR_NULL_PTR;
+    }
+    
+    let result = catch_unwind(|| {
+        let ctx = unsafe { &mut *ctx_ptr };
+        if let Some(node) = ctx.nodes.get_mut(node_id as usize) {
+            
+            // Map the integer values to crossterm colors and attributes, using Reset for out-of-range values.
+            node.style.fg = if (0..=255).contains(&fg) {
+                crossterm::style::Color::AnsiValue(fg as u8)
+            } else {
+                crossterm::style::Color::Reset
+            };
+
+            // Background color mapping, using Reset for out-of-range values.
+            node.style.bg = if (0..=255).contains(&bg) {
+                crossterm::style::Color::AnsiValue(bg as u8)
+            } else {
+                crossterm::style::Color::Reset
+            };
+
+            // Modifier mapping, using Reset for out-of-range values.
+            node.style.modifier = match modifier {
+                1 => crossterm::style::Attribute::Bold,
+                2 => crossterm::style::Attribute::Underlined,
+                3 => crossterm::style::Attribute::Italic,
+                4 => crossterm::style::Attribute::Reverse,
+                _ => crossterm::style::Attribute::Reset,
+            };
+            
+            ctx.needs_redraw = true; 
+            return STATUS_OK;
+        }
+        STATUS_ERR_INVALID_ID
+    });
+
+    result.unwrap_or(STATUS_ERR_PANIC)
+}
 
 // This function polls for terminal events, such as key presses or mouse clicks, and processes them.
 // It updates the application state and returns a status code indicating the result.
@@ -286,26 +355,75 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                     }
                 }
                 Ok(Mouse(mouse_event)) => {
-                    if mouse_event.kind == MouseEventKind::Down(MouseButton::Left) {
-                        let mx = mouse_event.column;
-                        let my = mouse_event.row;
+                    match mouse_event.kind {
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            let mx = mouse_event.column;
+                            let my = mouse_event.row;
 
-                        // Check if a button was clicked based on its layout.
-                        let mut clicked_id = None;
-                        for (id, node) in ctx.nodes.iter() {
-                            if matches!(node.node_type, NodeType::Button(_)) {
+                        
+                            let absolute_y = my.saturating_add(ctx.scroll_offset_y);
+
+                            let mut clicked_button_id = None;
+                            let mut clicked_checkbox_id = None;
+
+                            for (id, node) in ctx.nodes.iter() {
                                 let l = node.layout;
-                                if mx >= l.x && mx < l.x + l.width && my >= l.y && my < l.y + l.height {
-                                    clicked_id = Some(id);
-                                    break;
+                                if mx >= l.x && mx < l.x + l.width && absolute_y >= l.y && absolute_y < l.y + l.height {
+                                    if matches!(node.node_type, NodeType::Button(_)) {
+                                        clicked_button_id = Some(id);
+                                        break;
+                                    } else if matches!(node.node_type, NodeType::Checkbox(_)) {
+                                        clicked_checkbox_id = Some(id);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // Set the clicked button ID in the context if a button was clicked, which will be read by the application logic.
+                            if let Some(id) = clicked_button_id {
+                                ctx.clicked_button = Some(id);
+                                return STATUS_CLICKED; 
+                            }
+
+                            // Toggle the checkbox state if a checkbox was clicked.
+                            if let Some(id) = clicked_checkbox_id {
+                                if let Some(node) = ctx.nodes.get_mut(id) {
+                                    if let NodeType::Checkbox(ref mut state) = node.node_type {
+                                        *state = !*state; // Toggle the checkbox state
+                                        state_changed = true; // Signal the render to redraw with the new checkbox state
+                                    }
                                 }
                             }
                         }
+                        MouseEventKind::ScrollUp => {
 
-                        if let Some(id) = clicked_id {
-                            ctx.clicked_button = Some(id);
-                            return STATUS_CLICKED; // Notify Ruby about the click event.
+                            // Scroll up by decreasing the scroll offset, ensuring it doesn't go below zero.
+                            if ctx.scroll_offset_y > 0 {
+                                ctx.scroll_offset_y = ctx.scroll_offset_y.saturating_sub(1);
+                                state_changed = true;
+                            }
                         }
+                        MouseEventKind::ScrollDown => {
+
+                            // Calculate the maximum content height based on the layout of the root node.
+                            let mut max_content_height = 0;
+                            if let Some(root_id) = ctx.root_id {
+                                if let Some(root) = ctx.nodes.get(root_id) {
+                                    max_content_height = root.layout.height;
+                                }
+                            }
+
+                            // The maximum scroll offset is the total content height minus the terminal height, 
+                            // ensuring we don't scroll past the end of the content.
+                            let term_height = ctx.next_buffer.height;   
+                            let max_scroll = max_content_height.saturating_sub(term_height);
+
+                            if ctx.scroll_offset_y < max_scroll {
+                                ctx.scroll_offset_y = ctx.scroll_offset_y.saturating_add(1);
+                                state_changed = true;
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 Ok(Event::Resize(_, _)) => {

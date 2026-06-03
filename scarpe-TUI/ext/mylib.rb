@@ -15,4 +15,7 @@ module ScarpeTuiBackend
   attach_function :scarpe_tui_get_text, [:pointer, :int], :pointer
   attach_function :scarpe_tui_free_string, [:uint64], :void
   attach_function :scarpe_tui_get_clicked_button, [:pointer], :int
+  attach_function :scarpe_tui_get_checkbox_state, [:pointer, :int], :int
+  attach_function :scarpe_tui_get_checkbox_state, [:pointer, :int], :int
+  attach_function :scarpe_tui_set_style, [:pointer, :int, :int, :int, :int], :int
 end
