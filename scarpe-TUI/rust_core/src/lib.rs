@@ -1,8 +1,11 @@
 mod context;
 mod ffi;
 
+use std::sync::mpsc::Receiver;
+
 use std::os::raw::c_int;
 
+use crossterm::event::{Event};
 use crossterm::style::{Print, Color, Attribute};
 use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -31,6 +34,7 @@ pub enum NodeType {
     EditLine(String), // Represents an editable line with a string value
     Button(String), // Represents a button with a label
     Checkbox(bool), // Represents a checkbox with a boolean state
+    Border, // Decorative border node
 }
 
 // Struct representing the computed layout of a node
@@ -80,6 +84,7 @@ pub struct ScarpeTuiContext {
     pub needs_redraw: bool, // Flag indicating whether a redraw is needed
     pub clicked_button: Option<NodeId>, // ID of the node that was clicked
     pub scroll_offset_y: u16, // Scroll offset for the UI
+    pub event_receiver: Option<Receiver<Event>>, // Receiver for input events
 }
 
 // Represents a single cell in the rendering buffer

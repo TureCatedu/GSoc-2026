@@ -3,9 +3,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::panic::catch_unwind;
 use std::ptr::{self, null_mut};
-use std::time::Duration;
-use crossterm::event::Event::Mouse;
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind, poll, read};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use crate::{STATUS_ERR_NULL_PTR, STATUS_ERR_PANIC, STATUS_OK, STATUS_QUIT, STATUS_ERR_INVALID_ID, STATUS_CLICKED};
 
 // This function creates a new node in the virtual DOM based on the provided type and text content. 
@@ -65,6 +63,7 @@ pub extern "C" fn scarpe_tui_create_node(
                 NodeType::Button(text_content)
             }
             6 => NodeType::Checkbox(false),
+            7 => NodeType::Border,
             _ => NodeType::Stack, // Default to Stack for unknown types.
         };
 
@@ -289,8 +288,7 @@ pub extern "C" fn scarpe_tui_set_style(
     result.unwrap_or(STATUS_ERR_PANIC)
 }
 
-// This function polls for terminal events, such as key presses or mouse clicks, and processes them.
-// It updates the application state and returns a status code indicating the result.
+// This function polls for user input events (keyboard and mouse) and updates the TUI context accordingly.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_int {
     if ctx_ptr.is_null() {
@@ -301,135 +299,127 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
         let ctx = unsafe { &mut *ctx_ptr };
         let mut quit_requested = false;
         let mut state_changed = false; 
-        while let Ok(true) = poll(Duration::from_millis(0)) {
-            match read() {
-                Ok(Event::Key(key_event)) => {
-                    if key_event.kind != KeyEventKind::Press {
-                        continue;
-                    }
-                    // Handle exit logic.
-                    if key_event.code == KeyCode::Esc || 
-                       (key_event.modifiers.contains(KeyModifiers::CONTROL) && key_event.code == KeyCode::Char('c')) {
-                        quit_requested = true;
-                        break; 
-                    }
+        
 
-                    if key_event.code == crossterm::event::KeyCode::Tab {
-                        // Collect all EditLine node IDs
-                        let mut edit_lines = Vec::new();
-                        for (id, node) in ctx.nodes.iter() {
-                            if matches!(node.node_type, NodeType::EditLine(_)) {
-                                edit_lines.push(id);
-                            }
+        if let Some(ref rx) = ctx.event_receiver {
+
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    Event::Key(key_event) => {
+                        if key_event.kind != KeyEventKind::Press {
+                            continue;
                         }
                         
-                        // Pass focus to the next EditLine in the array
-                        if !edit_lines.is_empty() {
-                            let current_idx = edit_lines.iter().position(|&id| Some(id) == ctx.focused_node).unwrap_or(0);
-                            let next_idx = (current_idx + 1) % edit_lines.len();
-                            ctx.focused_node = Some(edit_lines[next_idx]);
-                            
-                            state_changed = true; // Signal the render to redraw
+                        if key_event.code == KeyCode::Esc || 
+                           (key_event.modifiers.contains(KeyModifiers::CONTROL) && key_event.code == KeyCode::Char('c')) {
+                            quit_requested = true;
+                            break; 
                         }
-                        continue; 
-                    }
-                    
-                    // Handle typing in EditLine nodes.
-                    if let Some(focus_id) = ctx.focused_node {
-                        if let Some(node) = ctx.nodes.get_mut(focus_id) {
-                            if let NodeType::EditLine(ref mut text) = node.node_type {
-                                match key_event.code {
-                                    KeyCode::Char(c) if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT => {
-                                        text.push(c);
-                                        state_changed = true;
+
+                        if key_event.code == crossterm::event::KeyCode::Tab {
+                            let mut edit_lines = Vec::new();
+                            for (id, node) in ctx.nodes.iter() {
+                                if matches!(node.node_type, NodeType::EditLine(_)) {
+                                    edit_lines.push(id);
+                                }
+                            }
+                            
+                            if !edit_lines.is_empty() {
+                                let current_idx = edit_lines.iter().position(|&id| Some(id) == ctx.focused_node).unwrap_or(0);
+                                let next_idx = (current_idx + 1) % edit_lines.len();
+                                ctx.focused_node = Some(edit_lines[next_idx]);
+                                state_changed = true; 
+                            }
+                            continue; 
+                        }
+                        
+                        if let Some(focus_id) = ctx.focused_node {
+                            if let Some(node) = ctx.nodes.get_mut(focus_id) {
+                                if let NodeType::EditLine(ref mut text) = node.node_type {
+                                    match key_event.code {
+                                        KeyCode::Char(c) if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT => {
+                                            text.push(c);
+                                            state_changed = true;
+                                        }
+                                        KeyCode::Backspace => {
+                                            if text.pop().is_some() {
+                                                state_changed = true; 
+                                            }
+                                        }
+                                        _ => {}
                                     }
-                                    KeyCode::Backspace => {
-                                        if text.pop().is_some() {
+                                }
+                            }
+                        }
+                    }
+                    Event::Mouse(mouse_event) => {
+                        match mouse_event.kind {
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                let mx = mouse_event.column;
+                                let my = mouse_event.row;
+
+                                let absolute_y = my.saturating_add(ctx.scroll_offset_y);
+
+                                let mut clicked_button_id = None;
+                                let mut clicked_checkbox_id = None;
+
+                                for (id, node) in ctx.nodes.iter() {
+                                    let l = node.layout;
+                                    if mx >= l.x && mx < l.x + l.width && absolute_y >= l.y && absolute_y < l.y + l.height {
+                                        if matches!(node.node_type, NodeType::Button(_)) {
+                                            clicked_button_id = Some(id);
+                                            break;
+                                        } else if matches!(node.node_type, NodeType::Checkbox(_)) {
+                                            clicked_checkbox_id = Some(id);
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if let Some(id) = clicked_button_id {
+                                    ctx.clicked_button = Some(id);
+                                    return STATUS_CLICKED; 
+                                }
+
+                                if let Some(id) = clicked_checkbox_id {
+                                    if let Some(node) = ctx.nodes.get_mut(id) {
+                                        if let NodeType::Checkbox(ref mut state) = node.node_type {
+                                            *state = !*state;
                                             state_changed = true; 
                                         }
                                     }
-                                    _ => {}
                                 }
                             }
-                        }
-                    }
-                }
-                Ok(Mouse(mouse_event)) => {
-                    match mouse_event.kind {
-                        MouseEventKind::Down(MouseButton::Left) => {
-                            let mx = mouse_event.column;
-                            let my = mouse_event.row;
-
-                        
-                            let absolute_y = my.saturating_add(ctx.scroll_offset_y);
-
-                            let mut clicked_button_id = None;
-                            let mut clicked_checkbox_id = None;
-
-                            for (id, node) in ctx.nodes.iter() {
-                                let l = node.layout;
-                                if mx >= l.x && mx < l.x + l.width && absolute_y >= l.y && absolute_y < l.y + l.height {
-                                    if matches!(node.node_type, NodeType::Button(_)) {
-                                        clicked_button_id = Some(id);
-                                        break;
-                                    } else if matches!(node.node_type, NodeType::Checkbox(_)) {
-                                        clicked_checkbox_id = Some(id);
-                                        break;
+                            MouseEventKind::ScrollUp => {
+                                if ctx.scroll_offset_y > 0 {
+                                    ctx.scroll_offset_y = ctx.scroll_offset_y.saturating_sub(1);
+                                    state_changed = true;
+                                }
+                            }
+                            MouseEventKind::ScrollDown => {
+                                let mut max_content_height = 0;
+                                if let Some(root_id) = ctx.root_id {
+                                    if let Some(root) = ctx.nodes.get(root_id) {
+                                        max_content_height = root.layout.height;
                                     }
                                 }
-                            }
+                                
+                                let term_height = ctx.next_buffer.height;
+                                let max_scroll = max_content_height.saturating_sub(term_height);
 
-                            // Set the clicked button ID in the context if a button was clicked, which will be read by the application logic.
-                            if let Some(id) = clicked_button_id {
-                                ctx.clicked_button = Some(id);
-                                return STATUS_CLICKED; 
-                            }
-
-                            // Toggle the checkbox state if a checkbox was clicked.
-                            if let Some(id) = clicked_checkbox_id {
-                                if let Some(node) = ctx.nodes.get_mut(id) {
-                                    if let NodeType::Checkbox(ref mut state) = node.node_type {
-                                        *state = !*state; // Toggle the checkbox state
-                                        state_changed = true; // Signal the render to redraw with the new checkbox state
-                                    }
+                                if ctx.scroll_offset_y < max_scroll {
+                                    ctx.scroll_offset_y = ctx.scroll_offset_y.saturating_add(1);
+                                    state_changed = true;
                                 }
                             }
+                            _ => {}
                         }
-                        MouseEventKind::ScrollUp => {
-
-                            // Scroll up by decreasing the scroll offset, ensuring it doesn't go below zero.
-                            if ctx.scroll_offset_y > 0 {
-                                ctx.scroll_offset_y = ctx.scroll_offset_y.saturating_sub(1);
-                                state_changed = true;
-                            }
-                        }
-                        MouseEventKind::ScrollDown => {
-
-                            // Calculate the maximum content height based on the layout of the root node.
-                            let mut max_content_height = 0;
-                            if let Some(root_id) = ctx.root_id {
-                                if let Some(root) = ctx.nodes.get(root_id) {
-                                    max_content_height = root.layout.height;
-                                }
-                            }
-
-                            // The maximum scroll offset is the total content height minus the terminal height, 
-                            // ensuring we don't scroll past the end of the content.
-                            let term_height = ctx.next_buffer.height;   
-                            let max_scroll = max_content_height.saturating_sub(term_height);
-
-                            if ctx.scroll_offset_y < max_scroll {
-                                ctx.scroll_offset_y = ctx.scroll_offset_y.saturating_add(1);
-                                state_changed = true;
-                            }
-                        }
-                        _ => {}
                     }
+                    Event::Resize(_, _) => {
+                        state_changed = true;
+                    }
+                    _ => {}
                 }
-                Ok(Event::Resize(_, _)) => {
-                    state_changed = true;
-                }
-                _ => {}
             }
         }
         

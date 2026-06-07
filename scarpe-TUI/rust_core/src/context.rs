@@ -1,12 +1,18 @@
 use crate::*;
-use crossterm::QueueableCommand;
-use crossterm::cursor::{MoveTo, Show, Hide};
+use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use crossterm::style::{SetForegroundColor, SetBackgroundColor, SetAttribute, ResetColor, Color, Attribute};
-use crossterm::terminal::{Clear, ClearType, size};
+use crossterm::style::{
+    Attribute, Color, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
+};
+use crossterm::terminal::{size, Clear, ClearType};
+use crossterm::QueueableCommand;
 use slab::Slab;
-use std::mem::swap;
 use std::io::{stdout, Error, Write};
+use std::mem::swap;
+
+use std::sync::mpsc;
+use std::thread;
+
 
 impl ScarpeTuiContext {
     // Initializes a new Scarpe TUI context with optional alternate screen buffer.
@@ -18,7 +24,24 @@ impl ScarpeTuiContext {
         stdout().execute(EnableMouseCapture)?; // Enable mouse capture
         let (width, height) = size().unwrap_or((80, 24));
 
-        Ok(ScarpeTuiContext { 
+        // Set up a channel for event handling
+        let (tx, rx) = mpsc::channel();
+
+        // Spawn a thread to read terminal events and send them through the channel
+        thread::spawn(move || {
+            loop {
+
+                if let Ok(event) = crossterm::event::read() {
+                    if tx.send(event).is_err() {
+                        break; // Exit the thread if the receiver has been dropped
+                    }
+                } else {
+                    break;
+                }
+            }
+        });
+
+        Ok(ScarpeTuiContext {
             use_alternate,
             nodes: Slab::with_capacity(1024), // Preallocate space for graphical nodes
             root_id: None,
@@ -28,6 +51,7 @@ impl ScarpeTuiContext {
             needs_redraw: true,
             clicked_button: None,
             scroll_offset_y: 0, // Initialize vertical scroll offset to zero
+            event_receiver: Some(rx), // Event receiver will be set up later
         })
     }
 
@@ -46,7 +70,7 @@ impl ScarpeTuiContext {
             stdout().execute(Clear(ClearType::All))?;
         }
 
-        self.next_buffer.reset(); 
+        self.next_buffer.reset();
         self.compute_layouts(); // Recalculate absolute geometries of all nodes recursively.
 
         // Draw the tree starting from the official root node.
@@ -67,12 +91,12 @@ impl ScarpeTuiContext {
 
                 if next_cell != current_cell {
                     out.queue(MoveTo(x, y))?;
-                    
+
                     // Apply modifiers first. Reset also clears physical colors on the terminal.
                     if next_cell.modifier != current_attr {
                         out.queue(SetAttribute(next_cell.modifier))?;
                         current_attr = next_cell.modifier;
-                        
+
                         // Crossterm Attribute::Reset resets terminal colors, so we must reapply them.
                         if next_cell.modifier == Attribute::Reset {
                             current_fg = Color::Reset;
@@ -85,7 +109,7 @@ impl ScarpeTuiContext {
                         out.queue(SetForegroundColor(next_cell.fg))?;
                         current_fg = next_cell.fg;
                     }
-                    
+
                     if next_cell.bg != current_bg {
                         out.queue(SetBackgroundColor(next_cell.bg))?;
                         current_bg = next_cell.bg;
@@ -96,7 +120,7 @@ impl ScarpeTuiContext {
             }
         }
         out.queue(ResetColor)?; // Reset terminal colors at the end of rendering
-        
+
         out.flush()?; // Flush the graphical command queue to Crossterm
 
         swap(&mut self.current_buffer, &mut self.next_buffer); // Swap buffers (Double-Buffering)
@@ -109,7 +133,12 @@ impl ScarpeTuiContext {
     fn draw_node(&mut self, id: NodeId) {
         let (node_type, layout, children, style) = {
             if let Some(node) = self.nodes.get(id) {
-                (node.node_type.clone(), node.layout, node.children.clone(), node.style)
+                (
+                    node.node_type.clone(),
+                    node.layout,
+                    node.children.clone(),
+                    node.style,
+                )
             } else {
                 return;
             }
@@ -117,6 +146,35 @@ impl ScarpeTuiContext {
 
         // Convert the unsigned scroll offset to signed for safe arithmetic.
         let offset_y = self.scroll_offset_y as i32;
+
+        if matches!(node_type, NodeType::Border) {
+            let x = layout.x as i32;
+            let y = layout.y as i32 - offset_y;
+            let w = layout.width as i32;
+            let h = layout.height as i32;
+
+            if w > 1 && h > 1 {
+                // Draw the top border.
+                self.next_buffer.set_char_clamped(x, y, '┌', style);
+                for i in 1..(w - 1) { 
+                    self.next_buffer.set_char_clamped(x + i, y, '─', style); 
+                }
+                self.next_buffer.set_char_clamped(x + w - 1, y, '┐', style);
+
+                // Draw the vertical borders.
+                for j in 1..(h - 1) {
+                    self.next_buffer.set_char_clamped(x, y + j, '│', style);
+                    self.next_buffer.set_char_clamped(x + w - 1, y + j, '│', style);
+                }
+
+                // Draw the bottom border.
+                self.next_buffer.set_char_clamped(x, y + h - 1, '└', style);
+                for i in 1..(w - 1) { 
+                    self.next_buffer.set_char_clamped(x + i, y + h - 1, '─', style); 
+                }
+                self.next_buffer.set_char_clamped(x + w - 1, y + h - 1, '┘', style);
+            }
+        }
 
         // Render text widgets (Text/Para).
         if let NodeType::Text(ref text) = node_type {
@@ -130,9 +188,10 @@ impl ScarpeTuiContext {
                 }
                 if cursor_y >= (layout.y + layout.height) as i32 - offset_y {
                     break;
-                }  
+                }
                 // Automatically clip coordinates outside the screen.
-                self.next_buffer.set_char_clamped(cursor_x, cursor_y, ch, style);
+                self.next_buffer
+                    .set_char_clamped(cursor_x, cursor_y, ch, style);
                 cursor_x += 1;
             }
         }
@@ -143,12 +202,14 @@ impl ScarpeTuiContext {
             let cursor_y = layout.y as i32 - offset_y;
             let max_x = (layout.x + layout.width) as i32;
 
-            self.next_buffer.set_char_clamped(cursor_x, cursor_y, '>', style); // EditLine prefix
-            cursor_x += 2; 
+            self.next_buffer
+                .set_char_clamped(cursor_x, cursor_y, '>', style); // EditLine prefix
+            cursor_x += 2;
 
             for ch in text.chars() {
                 if cursor_x < max_x {
-                    self.next_buffer.set_char_clamped(cursor_x, cursor_y, ch, style);
+                    self.next_buffer
+                        .set_char_clamped(cursor_x, cursor_y, ch, style);
                     cursor_x += 1;
                 }
             }
@@ -158,7 +219,7 @@ impl ScarpeTuiContext {
                 // Show the cursor only if the active EditLine row is visible on the screen.
                 if cursor_y >= 0 && cursor_y < self.next_buffer.height as i32 {
                     let _ = stdout().execute(MoveTo(cursor_x as u16, cursor_y as u16));
-                    let _ = stdout().execute(Show); 
+                    let _ = stdout().execute(Show);
                 } else {
                     let _ = stdout().execute(Hide); // Hide if the element is scrolled out of the viewport.
                 }
@@ -169,21 +230,26 @@ impl ScarpeTuiContext {
         if let NodeType::Button(ref text) = node_type {
             let mut cursor_x = layout.x as i32;
             let cursor_y = layout.y as i32 - offset_y;
-            
-            self.next_buffer.set_char_clamped(cursor_x, cursor_y, '[', style); 
-            self.next_buffer.set_char_clamped(cursor_x + 1, cursor_y, ' ', style);
+
+            self.next_buffer
+                .set_char_clamped(cursor_x, cursor_y, '[', style);
+            self.next_buffer
+                .set_char_clamped(cursor_x + 1, cursor_y, ' ', style);
             cursor_x += 2;
 
             for ch in text.chars() {
                 if cursor_x < (layout.x + layout.width - 2) as i32 {
-                    self.next_buffer.set_char_clamped(cursor_x, cursor_y, ch, style);
+                    self.next_buffer
+                        .set_char_clamped(cursor_x, cursor_y, ch, style);
                     cursor_x += 1;
                 }
             }
 
             if cursor_x < (layout.x + layout.width) as i32 {
-                self.next_buffer.set_char_clamped(cursor_x, cursor_y, ' ', style);
-                self.next_buffer.set_char_clamped(cursor_x + 1, cursor_y, ']', style);
+                self.next_buffer
+                    .set_char_clamped(cursor_x, cursor_y, ' ', style);
+                self.next_buffer
+                    .set_char_clamped(cursor_x + 1, cursor_y, ']', style);
             }
         }
 
@@ -192,10 +258,13 @@ impl ScarpeTuiContext {
             let cursor_x = layout.x as i32;
             let cursor_y = layout.y as i32 - offset_y;
 
-            self.next_buffer.set_char_clamped(cursor_x, cursor_y, '[', style);
+            self.next_buffer
+                .set_char_clamped(cursor_x, cursor_y, '[', style);
             let mark = if checked { 'X' } else { ' ' };
-            self.next_buffer.set_char_clamped(cursor_x + 1, cursor_y, mark, style);
-            self.next_buffer.set_char_clamped(cursor_x + 2, cursor_y, ']', style);
+            self.next_buffer
+                .set_char_clamped(cursor_x + 1, cursor_y, mark, style);
+            self.next_buffer
+                .set_char_clamped(cursor_x + 2, cursor_y, ']', style);
         }
 
         // Recursively draw child nodes of the interface.
@@ -254,6 +323,26 @@ impl ScarpeTuiContext {
                     computed_height += child_layout.height;
                 }
             }
+            NodeType::Border => {
+                // Border nodes add a fixed padding around their children and adjust their size accordingly.
+                let child_start_x = start_x + 1;
+                let mut child_start_y = start_y + 1;
+                let available_child_width = max_width.saturating_sub(2);
+
+                let mut max_child_width = 0;
+                let mut total_child_height = 0;
+
+                for child_id in children {
+                    let child_layout = self.layout_node(child_id, child_start_x, child_start_y, available_child_width);
+                    child_start_y += child_layout.height;
+                    total_child_height += child_layout.height;
+                    max_child_width = max_child_width.max(child_layout.width);
+                }
+
+
+                computed_width = max_child_width + 2;
+                computed_height = total_child_height + 2;
+            }
             NodeType::Flow => {
                 let mut row_height = 0;
 
@@ -263,8 +352,8 @@ impl ScarpeTuiContext {
                         self.layout_node(child_id, current_x, current_y, available_width);
 
                     if current_x + child_layout.width > start_x + max_width {
-                        current_x = start_x; 
-                        current_y += row_height; 
+                        current_x = start_x;
+                        current_y += row_height;
                         computed_height += row_height;
                         row_height = 0;
 
@@ -277,9 +366,11 @@ impl ScarpeTuiContext {
                 }
                 computed_height += row_height;
             }
-            NodeType::Text(ref text) | NodeType::EditLine(ref text) | NodeType::Button(ref text) => {
+            NodeType::Text(ref text)
+            | NodeType::EditLine(ref text)
+            | NodeType::Button(ref text) => {
                 let mut text_len = text.chars().count() as u16;
-                
+
                 if matches!(node_type, NodeType::Button(_)) {
                     text_len += 4; // Account for button brackets.
                 }
@@ -289,10 +380,14 @@ impl ScarpeTuiContext {
                 }
 
                 computed_width = text_len.min(max_width);
-                if computed_width == 0 { computed_width = 1; }
+                if computed_width == 0 {
+                    computed_width = 1;
+                }
                 computed_height = (text_len as f32 / computed_width as f32).ceil() as u16;
-                
-                if computed_height == 0 { computed_height = 1; }
+
+                if computed_height == 0 {
+                    computed_height = 1;
+                }
             }
             NodeType::Checkbox(_) => {
                 computed_width = 3; // Checkbox width is fixed.

@@ -146,6 +146,18 @@ module Scarpe
       Checkbox.new(self, id)
     end
 
+    # Creates a decorative border (cornice) in the TUI. It can contain nested elements defined in the block.
+    def border(stroke: nil, fill: nil, modifier: nil, &block)
+      border_id = create_tui_node(7) # Type 7: Border (Cornice Decorativa)
+      link_tui_nodes(@node_stack.last, border_id)
+      
+      apply_style(border_id, stroke: stroke, fill: fill, modifier: modifier)
+
+      # Push the border node onto the stack to allow nested elements to be linked correctly.
+      @node_stack.push(border_id)
+      instance_eval(&block) if block_given?
+      @node_stack.pop
+    end
 
     # Retrieves the text of a node from the Rust backend.
     # Ensures safe memory handling by freeing the allocated string after use.
@@ -214,7 +226,6 @@ module Scarpe
         status_code = ScarpeTuiBackend.scarpe_tui_render(@ctx_ptr)
         handle_rust_status!(status_code)
         
-        sleep(0.005) 
       end
     end
 
