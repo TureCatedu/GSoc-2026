@@ -32,6 +32,7 @@ pub enum NodeType {
     Flow, // Represents a flow layout node
     Text(String), // Represents a text node with a string value
     EditLine(String), // Represents an editable line with a string value
+    EditBox(String), // Represents an editable box with a string value
     Button(String), // Represents a button with a label
     Checkbox(bool), // Represents a checkbox with a boolean state
     Border, // Decorative border node

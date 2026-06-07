@@ -64,6 +64,18 @@ pub extern "C" fn scarpe_tui_create_node(
             }
             6 => NodeType::Checkbox(false),
             7 => NodeType::Border,
+            8 => {
+                let text_content = if !text_ptr.is_null() {
+                    unsafe { CStr::from_ptr(text_ptr) }.to_string_lossy().into_owned()
+                } else {
+                    String::new()
+                };
+
+                if ctx.focused_node.is_none() {
+                    ctx.focused_node = Some(new_id);
+                }
+                NodeType::EditBox(text_content)
+            }
             _ => NodeType::Stack, // Default to Stack for unknown types.
         };
 
@@ -180,11 +192,13 @@ pub extern "C" fn scarpe_tui_get_text(ctx_ptr: *mut ScarpeTuiContext, node_id: c
         let ctx = unsafe { &mut *ctx_ptr };
         
         if let Some(node) = ctx.nodes.get(node_id as usize) {
-            if let NodeType::EditLine(ref text) = node.node_type {
-                // Create a C-string and pass ownership out of Rust.
-                if let Ok(c_string) = CString::new(text.clone()) {
-                    return c_string.into_raw(); 
+            match &node.node_type {
+                NodeType::EditLine(ref text) | NodeType::EditBox(ref text) => {
+                    if let Ok(c_string) = CString::new(text.clone()) {
+                        return c_string.into_raw(); 
+                    }
                 }
+                _ => {}
             }
         }
         null_mut()
@@ -300,9 +314,7 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
         let mut quit_requested = false;
         let mut state_changed = false; 
         
-
         if let Some(ref rx) = ctx.event_receiver {
-
             while let Ok(event) = rx.try_recv() {
                 match event {
                     Event::Key(key_event) => {
@@ -316,29 +328,54 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                             break; 
                         }
 
-                        if key_event.code == crossterm::event::KeyCode::Tab {
-                            let mut edit_lines = Vec::new();
+
+                        if key_event.code == KeyCode::Tab {
+                            let mut inputs = Vec::new();
                             for (id, node) in ctx.nodes.iter() {
-                                if matches!(node.node_type, NodeType::EditLine(_)) {
-                                    edit_lines.push(id);
+                                if matches!(node.node_type, NodeType::EditLine(_)) || matches!(node.node_type, NodeType::EditBox(_)) {
+                                    inputs.push(id);
                                 }
                             }
                             
-                            if !edit_lines.is_empty() {
-                                let current_idx = edit_lines.iter().position(|&id| Some(id) == ctx.focused_node).unwrap_or(0);
-                                let next_idx = (current_idx + 1) % edit_lines.len();
-                                ctx.focused_node = Some(edit_lines[next_idx]);
+
+                            if !inputs.is_empty() {
+                                let current_idx = inputs.iter().position(|&id| Some(id) == ctx.focused_node).unwrap_or(0);
+                                let next_idx = (current_idx + 1) % inputs.len();
+                                ctx.focused_node = Some(inputs[next_idx]);
                                 state_changed = true; 
                             }
                             continue; 
                         }
                         
+
                         if let Some(focus_id) = ctx.focused_node {
                             if let Some(node) = ctx.nodes.get_mut(focus_id) {
+                                
+
                                 if let NodeType::EditLine(ref mut text) = node.node_type {
                                     match key_event.code {
                                         KeyCode::Char(c) if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT => {
                                             text.push(c);
+                                            state_changed = true;
+                                        }
+                                        KeyCode::Backspace => {
+                                            if text.pop().is_some() {
+                                                state_changed = true; 
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                
+
+                                if let NodeType::EditBox(ref mut text) = node.node_type {
+                                    match key_event.code {
+                                        KeyCode::Char(c) if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT => {
+                                            text.push(c);
+                                            state_changed = true;
+                                        }
+                                        KeyCode::Enter => { 
+                                            text.push('\n');
                                             state_changed = true;
                                         }
                                         KeyCode::Backspace => {

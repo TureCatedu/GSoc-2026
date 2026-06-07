@@ -267,6 +267,38 @@ impl ScarpeTuiContext {
                 .set_char_clamped(cursor_x + 2, cursor_y, ']', style);
         }
 
+        if let NodeType::EditBox(ref text) = node_type {
+            let mut cursor_x = layout.x as i32;
+            let mut cursor_y = layout.y as i32 - offset_y;
+            let max_x = (layout.x + layout.width) as i32;
+
+            for ch in text.chars() {
+                if ch == '\n' {
+                    cursor_x = layout.x as i32;
+                    cursor_y += 1;
+                } else {
+                    if cursor_x < max_x {
+                        self.next_buffer.set_char_clamped(cursor_x, cursor_y, ch, style);
+                        cursor_x += 1;
+                    } else {
+
+                        cursor_x = layout.x as i32;
+                        cursor_y += 1;
+                        self.next_buffer.set_char_clamped(cursor_x, cursor_y, ch, style);
+                        cursor_x += 1;
+                    }
+                }
+            }
+        
+            if Some(id) == self.focused_node {
+                if cursor_y >= 0 && cursor_y < self.next_buffer.height as i32 {
+                    let _ = stdout().execute(MoveTo(cursor_x as u16, cursor_y as u16));
+                    let _ = stdout().execute(Show); 
+                } else {
+                    let _ = stdout().execute(Hide);
+                }
+            }
+        }
         // Recursively draw child nodes of the interface.
         for child_id in children {
             self.draw_node(child_id);
@@ -388,6 +420,32 @@ impl ScarpeTuiContext {
                 if computed_height == 0 {
                     computed_height = 1;
                 }
+            }
+            NodeType::EditBox(ref text) => {
+                let mut total_height = 1; 
+                let mut current_line_width = 0;
+                let mut max_w = 0;
+
+                for ch in text.chars() {
+                    if ch == '\n' {
+                        total_height += 1;
+                        max_w = max_w.max(current_line_width);
+                        current_line_width = 0;
+                    } else {
+                        current_line_width += 1;
+
+                        if current_line_width >= max_width {
+                            total_height += 1;
+                            max_w = max_w.max(current_line_width);
+                            current_line_width = 0;
+                        }
+                    }
+                }
+                max_w = max_w.max(current_line_width);
+                
+
+                computed_width = max_w.max(10).min(max_width);
+                computed_height = total_height.max(3); 
             }
             NodeType::Checkbox(_) => {
                 computed_width = 3; // Checkbox width is fixed.

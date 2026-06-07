@@ -31,6 +31,19 @@ module Scarpe
     end
   end
 
+  class EditBox
+    # Represents a multi-line editable text box in the TUI.
+    def initialize(app, id)
+      @app = app
+      @id = id
+    end
+
+    # Retrieves the current text from the Rust backend for this EditBox.
+    def text
+      @app.get_node_text(@id)
+    end
+  end
+
   class Checkbox
     # Represents a checkbox element in the TUI.
     def initialize(app, id)
@@ -123,6 +136,16 @@ module Scarpe
       EditLine.new(self, id)
     end
 
+    # Creates a multi-line editable text box in the TUI.
+    def edit_box(initial_text = "", stroke: nil, fill: nil, modifier: nil)
+      id = create_tui_node(8, initial_text.to_s) # Type 8: EditBox
+      link_tui_nodes(@node_stack.last, id)
+      
+      apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
+
+      EditBox.new(self, id)
+    end
+
     # Creates a button in the TUI. If a block is provided, it is executed when the button is clicked.
     def button(text, stroke: nil, fill: nil, modifier: nil, &block)
       button_id = create_tui_node(5, text.to_s) # Type 5: Button
@@ -133,6 +156,7 @@ module Scarpe
       @callbacks[button_id] = block if block_given?
     end
 
+    # Creates a checkbox in the TUI. If a block is provided, it is executed when the checkbox is toggled.
     def checkbox(*args, stroke: nil, fill: nil, modifier: nil)
 
       text = args.first.is_a?(String) ? args.first : nil

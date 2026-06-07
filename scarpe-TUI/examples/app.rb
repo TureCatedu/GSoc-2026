@@ -2,6 +2,7 @@ require_relative '../lib/scarpe_tui'
 
 Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
   border stroke: "cyan" do
+    
     stack do
       para "=== GENERATORE DI PROFILI GSoC 2026 ===", stroke: "cyan", modifier: "bold"
       para "Compila i campi qui sotto con la tastiera", stroke: "blue"
@@ -17,6 +18,7 @@ Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
 
     para " "
 
+    # Pre-dichiariamo la variabile per renderla visibile in tutta l'app
     termini_checkbox = nil 
     border stroke: "magenta" do
       flow do
@@ -24,14 +26,25 @@ Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
         para " Accetto i termini e condizioni"
       end
     end
+
+    # Pre-dichiariamo anche bio_input nello scope principale!
+    bio_input = nil
     
+    border stroke: "blue" do
+      stack do
+        para "Scrivi una breve biografia (Usa INVIO per andare a capo):"
+        bio_input = edit_box("") # Ora modifichiamo la variabile pre-dichiarata
+      end
+    end
+
     para " "
 
     flow do
-      button "Genera Profilo", stroke: "dark_green" do
+      button "Genera Profilo", stroke: "white", fill: "dark_green" do
         
         nome = nome_input.text.strip
         linguaggio = lang_input.text.strip
+        biografia = bio_input.text.strip
         
         accettato = termini_checkbox.checked?
 
@@ -46,11 +59,19 @@ Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
           para "Linguaggio : #{linguaggio}"
           para "Qualifica  : Architetto di Interfacce Native"
           para "Termini    : Accettati"
-          para "******************************"
+          para "Biografia  :"
+          
+          if biografia.empty?
+            para "Nessuna biografia inserita.", stroke: "dark_gray"
+          else
+            para biografia, stroke: "dark_yellow", modifier: "italic"
+          end
+          
+          para "******************************", stroke: "green"
         end
       end
 
-      button "Esci" do
+      button "Esci", stroke: "white", fill: "dark_red" do
         quit
       end
     end
