@@ -18,7 +18,6 @@ Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
 
     para " "
 
-    # Pre-dichiariamo la variabile per renderla visibile in tutta l'app
     termini_checkbox = nil 
     border stroke: "magenta" do
       flow do
@@ -27,19 +26,17 @@ Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
       end
     end
 
-    # Pre-dichiariamo anche bio_input nello scope principale!
     bio_input = nil
     
     border stroke: "blue" do
       stack do
         para "Scrivi una breve biografia (Usa INVIO per andare a capo):"
-        bio_input = edit_box("") # Ora modifichiamo la variabile pre-dichiarata
+        bio_input = edit_box("") 
       end
     end
 
     para " "
 
-    flow do
       stack do 
         button "Genera Profilo", stroke: "white", fill: "dark_green" do
           
@@ -80,4 +77,3 @@ Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
     end
 
   end
-end
