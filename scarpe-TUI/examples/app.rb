@@ -40,35 +40,38 @@ Scarpe.app(true, title: "Test Finale Scarpe-TUI") do
     para " "
 
     flow do
-      button "Genera Profilo", stroke: "white", fill: "dark_green" do
-        
-        nome = nome_input.text.strip
-        linguaggio = lang_input.text.strip
-        biografia = bio_input.text.strip
-        
-        accettato = termini_checkbox.checked?
-
-        if nome.empty? || linguaggio.empty?
-          para "-> ERRORE: Compila tutti i campi prima di generare!", stroke: "red"
-        elsif !accettato
-          para "-> ERRORE: Devi accettare i termini e condizioni per proseguire!", stroke: "red"
-        else
-          para " "
-          para "*** NUOVO PROFILO GENERATO ***", stroke: "green", modifier: "bold"
-          para "Nome Utente: #{nome}"
-          para "Linguaggio : #{linguaggio}"
-          para "Qualifica  : Architetto di Interfacce Native"
-          para "Termini    : Accettati"
-          para "Biografia  :"
+      stack do 
+        button "Genera Profilo", stroke: "white", fill: "dark_green" do
           
-          if biografia.empty?
-            para "Nessuna biografia inserita.", stroke: "dark_gray"
-          else
-            para biografia, stroke: "dark_yellow", modifier: "italic"
+          nome = nome_input.text.strip
+          linguaggio = lang_input.text.strip
+          biografia = bio_input.text.strip
+          
+          accettato = termini_checkbox.checked?
+          
+            para " "
+            if nome.empty? || linguaggio.empty?
+              para "-> ERRORE: Compila tutti i campi prima di generare!", stroke: "red"
+            elsif !accettato
+              para "-> ERRORE: Devi accettare i termini e condizioni per proseguire!", stroke: "red"
+            else
+              para " "
+              para "*** NUOVO PROFILO GENERATO ***", stroke: "green", modifier: "bold"
+              para "Nome Utente: #{nome}"
+              para "Linguaggio : #{linguaggio}"
+              para "Qualifica  : Architetto di Interfacce Native"
+              para "Termini    : Accettati"
+              para "Biografia  :"
+              
+              if biografia.empty?
+                para "Nessuna biografia inserita.", stroke: "dark_gray"
+              else
+                para biografia, stroke: "dark_yellow", modifier: "italic"
+              end
+              
+              para "******************************", stroke: "green"
+            end
           end
-          
-          para "******************************", stroke: "green"
-        end
       end
 
       button "Esci", stroke: "white", fill: "dark_red" do

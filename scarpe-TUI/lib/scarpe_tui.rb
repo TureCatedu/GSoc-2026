@@ -1,25 +1,20 @@
 require_relative '../ext/mylib'
 
 module Scarpe
-  # Define custom error classes to handle specific errors returned by the Rust backend.
-  # These errors correspond to specific failure cases in the Rust code.
+  # Custom error classes to handle specific errors returned by the Rust backend.
   class RustPanicError < StandardError; end
   class RustIOError < StandardError; end
   class RustNullPointerError < StandardError; end
   class RustInvalidIdError < StandardError; end
 
   # Entry point for creating and running a Scarpe application.
-  # This method initializes the application and sets up the TUI environment.
-  # Parameters:
-  # - `use_alternate`: Whether to use the alternate screen buffer (default: false).
-  # - `title`: The title of the application (default: "Scarpe App").
-  # - `&block`: A block of code defining the application's UI structure.
+  # Initializes the application and sets up the TUI environment.
   def self.app(use_alternate = false, title: "Scarpe App", &block)
     App.new(title, use_alternate: use_alternate, &block)
   end
 
+  # Represents an editable text field in the TUI.
   class EditLine
-    # Represents an editable text field in the TUI.
     def initialize(app, id)
       @app = app
       @id = id
@@ -31,8 +26,8 @@ module Scarpe
     end
   end
 
+  # Represents a multi-line editable text box in the TUI.
   class EditBox
-    # Represents a multi-line editable text box in the TUI.
     def initialize(app, id)
       @app = app
       @id = id
@@ -44,20 +39,23 @@ module Scarpe
     end
   end
 
+  # Represents a checkbox in the TUI.
   class Checkbox
-    # Represents a checkbox element in the TUI.
     def initialize(app, id)
       @app = app
       @id = id
     end
 
-    # Retrieves the current state of the checkbox from the Rust backend.
+    # Checks whether the checkbox is currently checked.
     def checked?
       @app.get_checkbox_state(@id)
     end
   end
 
+  # Main class for managing the Scarpe application.
+  # Handles the virtual DOM, rendering, and event handling.
   class App
+    # Predefined color codes for styling nodes.
     COLORS = {
       "black" => 0, "red" => 9, "green" => 10, "yellow" => 11,
       "blue" => 12, "magenta" => 13, "cyan" => 14, "white" => 15,
@@ -65,8 +63,22 @@ module Scarpe
       "dark_blue" => 4, "dark_magenta" => 5, "dark_cyan" => 6, "light_gray" => 7
     }.freeze
 
+    # Predefined text modifiers for styling nodes.
     MODIFIERS = {
       "bold" => 1, "underlined" => 2, "italic" => 3, "reverse" => 4
+    }.freeze
+
+    # Node type codes for creating different types of nodes in the virtual DOM.
+    NODE_TYPES = {
+      root: 0,
+      stack: 1,
+      flow: 2,
+      text: 3,
+      edit_line: 4,
+      button: 5,
+      checkbox: 6,
+      border: 7,
+      edit_box: 8
     }.freeze
 
     # Initializes the Scarpe application and sets up the TUI context.
@@ -78,24 +90,26 @@ module Scarpe
       @callbacks = {} # Hash to store callbacks for interactive elements.
 
       # Initialize the TUI context by calling the Rust backend.
-      # This sets up the environment for rendering the application's UI.
       @ctx_ptr = ScarpeTuiBackend.scarpe_tui_init(use_alternate)
       if @ctx_ptr.null?
         raise RustPanicError, "Failed to initialize Scarpe-TUI: Rust Core panicked or returned NULL."
       end
 
-      @root_node_id = create_tui_node(0) # Root node for the virtual DOM.
+      # Create the root node for the virtual DOM.
+      @root_node_id = create_tui_node(NODE_TYPES[:root])
       @node_stack.push(@root_node_id)
 
+      # Evaluate the block to build the UI structure.
       instance_eval(&block) if block_given?
       run_loop
     ensure
+      # Ensure the TUI context is freed when the application exits.
       shutdown if @ctx_ptr && !@ctx_ptr.null?
     end
 
     # Creates a stack container in the TUI. A stack arranges its children vertically.
     def stack(&block)
-      stack_id = create_tui_node(1) # Type 1: Stack
+      stack_id = create_tui_node(NODE_TYPES[:stack])
       link_tui_nodes(@node_stack.last, stack_id)
 
       @node_stack.push(stack_id)
@@ -105,7 +119,7 @@ module Scarpe
 
     # Creates a flow container in the TUI. A flow arranges its children horizontally.
     def flow(&block)
-      flow_id = create_tui_node(2) # Type 2: Flow
+      flow_id = create_tui_node(NODE_TYPES[:flow])
       link_tui_nodes(@node_stack.last, flow_id)
 
       @node_stack.push(flow_id)
@@ -113,12 +127,71 @@ module Scarpe
       @node_stack.pop
     end
 
-    # Creates a paragraph of text in the TUI.
+    # Creates a border container with optional styling.
+    def border(stroke: nil, fill: nil, modifier: nil, &block)
+      border_id = create_tui_node(NODE_TYPES[:border])
+      link_tui_nodes(@node_stack.last, border_id)
+      
+      apply_style(border_id, stroke: stroke, fill: fill, modifier: modifier)
+
+      @node_stack.push(border_id)
+      instance_eval(&block) if block_given?
+      @node_stack.pop
+    end
+
+    # Creates a paragraph of text in the TUI with optional styling.
     def para(text, stroke: nil, fill: nil, modifier: nil)
-      para_id = create_tui_node(3, text.to_s) # Type 3: Text
+      para_id = create_tui_node(NODE_TYPES[:text], text.to_s)
       link_tui_nodes(@node_stack.last, para_id)
       
       apply_style(para_id, stroke: stroke, fill: fill, modifier: modifier)
+    end
+
+    # Creates an editable text field in the TUI with optional styling.
+    def edit_line(initial_text = "", stroke: nil, fill: nil, modifier: nil)
+      id = create_tui_node(NODE_TYPES[:edit_line], initial_text.to_s)
+      link_tui_nodes(@node_stack.last, id)
+      
+      apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
+      EditLine.new(self, id)
+    end
+
+    # Creates a multi-line editable text box in the TUI with optional styling.
+    def edit_box(initial_text = "", stroke: nil, fill: nil, modifier: nil)
+      id = create_tui_node(NODE_TYPES[:edit_box], initial_text.to_s)
+      link_tui_nodes(@node_stack.last, id)
+      
+      apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
+      EditBox.new(self, id)
+    end
+
+    # Creates a checkbox in the TUI with optional styling and an optional callback.
+    def checkbox(*args, stroke: nil, fill: nil, modifier: nil, &block)
+      text = args.first.is_a?(String) ? args.first : nil
+      
+      id = create_tui_node(NODE_TYPES[:checkbox], text)
+      link_tui_nodes(@node_stack.last, id)
+      
+      apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
+      
+      if block_given?
+        # Store the callback block in the @callbacks hash, associating it with the checkbox's node ID.
+        @callbacks[id] = { parent: @node_stack.last, block: block } 
+      end
+      
+      Checkbox.new(self, id)
+    end
+
+    # Creates a button in the TUI with optional styling and an optional callback.
+    def button(text, stroke: nil, fill: nil, modifier: nil, &block)
+      button_id = create_tui_node(NODE_TYPES[:button], text.to_s)
+      link_tui_nodes(@node_stack.last, button_id)
+      
+      apply_style(button_id, stroke: stroke, fill: fill, modifier: modifier)
+      
+      if block_given?
+        @callbacks[button_id] = { parent: @node_stack.last, block: block }
+      end
     end
 
     # Signals the application to quit.
@@ -126,109 +199,48 @@ module Scarpe
       @should_quit = true
     end
 
-    # Creates an editable text field in the TUI.
-    def edit_line(initial_text = "", stroke: nil, fill: nil, modifier: nil)
-      id = create_tui_node(4, initial_text.to_s) # Type 4: EditLine
-      link_tui_nodes(@node_stack.last, id)
-
-      apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
-
-      EditLine.new(self, id)
-    end
-
-    # Creates a multi-line editable text box in the TUI.
-    def edit_box(initial_text = "", stroke: nil, fill: nil, modifier: nil)
-      id = create_tui_node(8, initial_text.to_s) # Type 8: EditBox
-      link_tui_nodes(@node_stack.last, id)
-      
-      apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
-
-      EditBox.new(self, id)
-    end
-
-    # Creates a button in the TUI. If a block is provided, it is executed when the button is clicked.
-    def button(text, stroke: nil, fill: nil, modifier: nil, &block)
-      button_id = create_tui_node(5, text.to_s) # Type 5: Button
-      link_tui_nodes(@node_stack.last, button_id)
-      
-      apply_style(button_id, stroke: stroke, fill: fill, modifier: modifier)
-
-      @callbacks[button_id] = block if block_given?
-    end
-
-    # Creates a checkbox in the TUI. If a block is provided, it is executed when the checkbox is toggled.
-    def checkbox(*args, stroke: nil, fill: nil, modifier: nil)
-
-      text = args.first.is_a?(String) ? args.first : nil
-      
-      id = create_tui_node(6, text) # Tipo 6: Checkbox
-      link_tui_nodes(@node_stack.last, id)
-      
-      apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
-      @callbacks[id] = block if block_given?
-      
-      Checkbox.new(self, id)
-    end
-
-    # Creates a decorative border (cornice) in the TUI. It can contain nested elements defined in the block.
-    def border(stroke: nil, fill: nil, modifier: nil, &block)
-      border_id = create_tui_node(7) # Type 7: Border (Cornice Decorativa)
-      link_tui_nodes(@node_stack.last, border_id)
-      
-      apply_style(border_id, stroke: stroke, fill: fill, modifier: modifier)
-
-      # Push the border node onto the stack to allow nested elements to be linked correctly.
-      @node_stack.push(border_id)
-      instance_eval(&block) if block_given?
-      @node_stack.pop
-    end
-
     # Retrieves the text of a node from the Rust backend.
-    # Ensures safe memory handling by freeing the allocated string after use.
     def get_node_text(node_id)
       str_ptr = ScarpeTuiBackend.scarpe_tui_get_text(@ctx_ptr, node_id)
       return "" if str_ptr.null?
 
       begin
-        ruby_string = str_ptr.read_string # Clone the native C-string into a Ruby string.
+        ruby_string = str_ptr.read_string
         return ruby_string
       ensure
-        # Ensure memory is freed in Rust to prevent leaks.
         ScarpeTuiBackend.scarpe_tui_free_string(str_ptr.address)
       end
     end
 
-
+    # Retrieves the state of a checkbox node from the Rust backend.
     def get_checkbox_state(node_id)
       status = ScarpeTuiBackend.scarpe_tui_get_checkbox_state(@ctx_ptr, node_id)
-      handle_rust_status!(status) # Check for errors in the Rust backend call.
+      handle_rust_status!(status)
       status == 1
     end
 
-
-    # Helper method to create a new TUI node by calling the Rust backend.
-    def create_tui_node(type_code, text = nil)
-      # type_code: 0 = Root, 1 = Stack, 2 = Flow, 3 = Text, 4 = EditLine, 5 = Button
-      result = ScarpeTuiBackend.scarpe_tui_create_node(@ctx_ptr, type_code, text)
-      handle_rust_status!(result)
-      result
-    end
-
-    # Helper method to link a child node to a parent node in the TUI hierarchy by calling the Rust backend.
-    def link_tui_nodes(parent_id, child_id)
-      status = ScarpeTuiBackend.scarpe_tui_append_child(@ctx_ptr, parent_id, child_id)
-      handle_rust_status!(status)
-    end
-
+    # Applies styling to a node using the Rust backend.
     def apply_style(node_id, stroke: nil, fill: nil, modifier: nil)
       fg_code = COLORS[stroke.to_s] || -1
       bg_code = COLORS[fill.to_s] || -1
       mod_code = MODIFIERS[modifier.to_s] || -1
 
-      # If all style parameters are invalid, skip the styling call to avoid unnecessary Rust backend interaction.
       return if fg_code == -1 && bg_code == -1 && mod_code == -1
 
       status = ScarpeTuiBackend.scarpe_tui_set_style(@ctx_ptr, node_id, fg_code, bg_code, mod_code)
+      handle_rust_status!(status)
+    end
+
+    # Creates a new node in the virtual DOM by calling the Rust backend.
+    def create_tui_node(type_code, text = nil)
+      result = ScarpeTuiBackend.scarpe_tui_create_node(@ctx_ptr, type_code, text)
+      handle_rust_status!(result)
+      result
+    end
+
+    # Links a child node to a parent node in the virtual DOM.
+    def link_tui_nodes(parent_id, child_id)
+      status = ScarpeTuiBackend.scarpe_tui_append_child(@ctx_ptr, parent_id, child_id)
       handle_rust_status!(status)
     end
 
@@ -239,9 +251,9 @@ module Scarpe
 
         event_code = ScarpeTuiBackend.scarpe_tui_poll_events(@ctx_ptr)
 
-        if event_code == 1 # STATUS_QUIT
+        if event_code == 1 
           quit
-        elsif event_code == 2 # STATUS_CLICKED
+        elsif event_code == 2
           handle_click!
         else
           handle_rust_status!(event_code)
@@ -249,12 +261,10 @@ module Scarpe
 
         status_code = ScarpeTuiBackend.scarpe_tui_render(@ctx_ptr)
         handle_rust_status!(status_code)
-        
       end
     end
 
-    # Helper method to handle status codes returned by the Rust backend.
-    # If the code is negative, it raises an appropriate error based on the specific code.
+    # Handles status codes returned by the Rust backend, raising appropriate errors for negative codes.
     def handle_rust_status!(code)
       return if code >= 0
 
@@ -280,8 +290,13 @@ module Scarpe
       clicked_id = ScarpeTuiBackend.scarpe_tui_get_clicked_button(@ctx_ptr)
       return if clicked_id < 0
 
-      callback = @callbacks[clicked_id]
-      instance_eval(&callback) if callback
+      callback_data = @callbacks[clicked_id]
+      return unless callback_data
+
+      # Push the parent node of the clicked button onto the stack, evaluate the callback block,
+      @node_stack.push(callback_data[:parent])
+      instance_eval(&callback_data[:block])
+      @node_stack.pop
     end
 
     # Frees the TUI context in the Rust backend to release resources.
