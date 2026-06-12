@@ -20,7 +20,6 @@ typedef struct ScarpeTuiContext ScarpeTuiContext;
 // Initializes the TUI context. If use_alternate is true, it will use an alternate rendering method 
 ScarpeTuiContext* scarpe_tui_init(bool use_alternate);
 
-
 // Renders the TUI based on the current state of the context. Returns a status code indicating success or failure.
 int scarpe_tui_render(ScarpeTuiContext* context);
 
@@ -30,6 +29,7 @@ void scarpe_tui_free_context(ScarpeTuiContext* context);
 // Appends a child element to a parent element in the TUI context. Returns a status code indicating success or failure.
 int scarpe_tui_append_child(ScarpeTuiContext* context, int parent_id, int child_id);
 
+// Polls for events (e.g., user input) and updates the TUI context accordingly. Returns a status code indicating success or failure.
 int scape_tui_poll_events(ScarpeTuiContext* context);
 
 #endif 

@@ -52,6 +52,18 @@ module Scarpe
     end
   end
 
+  # Represents a text node in the TUI, allowing for dynamic updates to its content.
+  class TextNode
+    def initialize(app, id)
+      @app = app
+      @id = id
+    end
+
+    def text=(new_text)
+      @app.update_node_text(@id, new_text)
+    end
+  end
+
   # Main class for managing the Scarpe application.
   # Handles the virtual DOM, rendering, and event handling.
   class App
@@ -78,7 +90,9 @@ module Scarpe
       button: 5,
       checkbox: 6,
       border: 7,
-      edit_box: 8
+      edit_box: 8,
+      dock_bottom: 9,
+      scroll_area: 10
     }.freeze
 
     # Initializes the Scarpe application and sets up the TUI context.
@@ -127,24 +141,12 @@ module Scarpe
       @node_stack.pop
     end
 
-    # Creates a border container with optional styling.
-    def border(stroke: nil, fill: nil, modifier: nil, &block)
-      border_id = create_tui_node(NODE_TYPES[:border])
-      link_tui_nodes(@node_stack.last, border_id)
-      
-      apply_style(border_id, stroke: stroke, fill: fill, modifier: modifier)
-
-      @node_stack.push(border_id)
-      instance_eval(&block) if block_given?
-      @node_stack.pop
-    end
-
-    # Creates a paragraph of text in the TUI with optional styling.
+    # Creates a text node in the TUI with optional styling and returns a TextNode object for dynamic updates.
     def para(text, stroke: nil, fill: nil, modifier: nil)
       para_id = create_tui_node(NODE_TYPES[:text], text.to_s)
       link_tui_nodes(@node_stack.last, para_id)
-      
       apply_style(para_id, stroke: stroke, fill: fill, modifier: modifier)
+      TextNode.new(self, para_id)
     end
 
     # Creates an editable text field in the TUI with optional styling.
@@ -194,6 +196,37 @@ module Scarpe
       end
     end
 
+    # Creates a border container with optional styling.
+    def border(stroke: nil, fill: nil, modifier: nil, &block)
+      border_id = create_tui_node(NODE_TYPES[:border])
+      link_tui_nodes(@node_stack.last, border_id)
+      
+      apply_style(border_id, stroke: stroke, fill: fill, modifier: modifier)
+
+      @node_stack.push(border_id)
+      instance_eval(&block) if block_given?
+      @node_stack.pop
+    end
+
+    # Creates a scrollable area in the TUI.
+    def dock_bottom(&block)
+      dock_id = create_tui_node(NODE_TYPES[:dock_bottom])
+      link_tui_nodes(@node_stack.last, dock_id)
+      @node_stack.push(dock_id)
+      instance_eval(&block) if block_given?
+      @node_stack.pop
+    end
+
+    # Creates a scrollable area in the TUI with an optional maximum height and styling.
+    def scroll_area(max_height: 10, stroke: nil, fill: nil, modifier: nil, &block)
+      scroll_id = create_tui_node(NODE_TYPES[:scroll_area], max_height.to_s)
+      link_tui_nodes(@node_stack.last, scroll_id)
+      apply_style(scroll_id, stroke: stroke, fill: fill, modifier: modifier)
+      @node_stack.push(scroll_id)
+      instance_eval(&block) if block_given?
+      @node_stack.pop
+    end
+
     # Signals the application to quit.
     def quit
       @should_quit = true
@@ -236,6 +269,12 @@ module Scarpe
       result = ScarpeTuiBackend.scarpe_tui_create_node(@ctx_ptr, type_code, text)
       handle_rust_status!(result)
       result
+    end
+
+    # Updates the text of an existing node in the virtual DOM by calling the Rust backend.
+    def update_node_text(node_id, new_text)
+      status = ScarpeTuiBackend.scarpe_tui_update_text(@ctx_ptr, node_id, new_text.to_s)
+      handle_rust_status!(status)
     end
 
     # Links a child node to a parent node in the virtual DOM.

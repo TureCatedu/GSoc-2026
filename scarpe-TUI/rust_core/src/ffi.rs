@@ -6,18 +6,13 @@ use std::ptr::{self, null_mut};
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use crate::{STATUS_ERR_NULL_PTR, STATUS_ERR_PANIC, STATUS_OK, STATUS_QUIT, STATUS_ERR_INVALID_ID, STATUS_CLICKED};
 
-// This function creates a new node in the virtual DOM based on the provided type and text content. 
-// It checks for null pointers and handles any panics gracefully, returning appropriate status codes 
-// based on the outcome of the node creation process.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_create_node(
     ctx_ptr: *mut ScarpeTuiContext,
     node_type_code: c_int,
     text_ptr: *const c_char, 
 ) -> c_int {
-    if ctx_ptr.is_null() {
-        return STATUS_ERR_NULL_PTR;
-    }
+    if ctx_ptr.is_null() { return STATUS_ERR_NULL_PTR; }
 
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
@@ -29,34 +24,18 @@ pub extern "C" fn scarpe_tui_create_node(
             1 => NodeType::Stack,
             2 => NodeType::Flow,
             3 => {
-                // Extract text content for a Text node, if provided.
                 let text_content = if !text_ptr.is_null() {
-                    unsafe { CStr::from_ptr(text_ptr) }
-                        .to_string_lossy()
-                        .into_owned()
-                } else {
-                    String::new()
-                };
+                    unsafe { CStr::from_ptr(text_ptr) }.to_string_lossy().into_owned()
+                } else { String::new() };
                 NodeType::Text(text_content)
             }
             4 => {
-                // Extract text content for an EditLine node, if provided.
                 let text_content = if !text_ptr.is_null() {
-                    unsafe { CStr::from_ptr(text_ptr) }
-                        .to_string_lossy()
-                        .into_owned()
-                } else {
-                    String::new()
-                };
-
-                // Set focus to this EditLine if no other node is focused.
-                if ctx.focused_node.is_none() {
-                    ctx.focused_node = Some(new_id);
-                }
+                    unsafe { CStr::from_ptr(text_ptr) }.to_string_lossy().into_owned()
+                } else { String::new() };
                 NodeType::EditLine(text_content)
             }
             5 => {
-                // Extract text content for a Button node, if provided.
                 let text_content = if !text_ptr.is_null() {
                     unsafe { std::ffi::CStr::from_ptr(text_ptr) }.to_string_lossy().into_owned()
                 } else { String::new() };
@@ -67,21 +46,20 @@ pub extern "C" fn scarpe_tui_create_node(
             8 => {
                 let text_content = if !text_ptr.is_null() {
                     unsafe { CStr::from_ptr(text_ptr) }.to_string_lossy().into_owned()
-                } else {
-                    String::new()
-                };
-
-                if ctx.focused_node.is_none() {
-                    ctx.focused_node = Some(new_id);
-                }
+                } else { String::new() };
                 NodeType::EditBox(text_content)
             }
-            _ => NodeType::Stack, // Default to Stack for unknown types.
+            9 => NodeType::DockBottom,
+            10 => {
+                let limit = if !text_ptr.is_null() {
+                    unsafe { std::ffi::CStr::from_ptr(text_ptr) }.to_string_lossy().parse::<u16>().unwrap_or(10)
+                } else { 10 };
+                NodeType::ScrollArea { scroll_offset_y: 0, max_height: limit }
+            }
+            _ => NodeType::Stack,
         };
 
-        if node_type_code == 0 {
-            ctx.root_id = Some(new_id);
-        }
+        if node_type_code == 0 { ctx.root_id = Some(new_id); }
         
         vacant_entry.insert(Node {
             id: new_id,
@@ -98,27 +76,18 @@ pub extern "C" fn scarpe_tui_create_node(
     result.unwrap_or(STATUS_ERR_PANIC)
 }
 
-// This function initializes the TUI context and returns a pointer to it.
-// It ensures that any panics during initialization are caught, returning a null pointer instead of crashing.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_init(use_alternate: bool) -> *mut ScarpeTuiContext {
     let result = catch_unwind(|| match ScarpeTuiContext::new(use_alternate) {
         Ok(ctx) => Box::into_raw(Box::new(ctx)),
         Err(_) => ptr::null_mut(),
     });
-
     result.unwrap_or(ptr::null_mut())
 }
 
-// This function renders the current state of the TUI context to the terminal. 
-// It checks for null pointers and handles any panics gracefully, 
-// returning appropriate status codes based on the outcome of the rendering process.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_render(ctx_ptr: *mut ScarpeTuiContext) -> c_int {
-    if ctx_ptr.is_null() {
-        return STATUS_ERR_NULL_PTR;
-    }
-
+    if ctx_ptr.is_null() { return STATUS_ERR_NULL_PTR; }
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
         match ctx.render() {
@@ -126,43 +95,25 @@ pub extern "C" fn scarpe_tui_render(ctx_ptr: *mut ScarpeTuiContext) -> c_int {
             Err(_) => STATUS_ERR_IO,
         }
     });
-
     result.unwrap_or(STATUS_ERR_PANIC)
 }
 
-// This function frees the resources associated with the TUI context. 
-// It checks for null pointers and ensures that the shutdown process is handled gracefully.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_free_context(ctx_ptr: *mut ScarpeTuiContext) {
-    if ctx_ptr.is_null() {
-        return;
-    }
-
+    if ctx_ptr.is_null() { return; }
     let _ = catch_unwind(|| {
         let mut ctx = unsafe { Box::from_raw(ctx_ptr) };
         let _ = ctx.shutdown();
     });
 }
 
-// This function appends a child node to a parent node in the virtual DOM. 
-// It checks for null pointers and valid IDs before performing the operation.
 #[no_mangle]
-pub extern "C" fn scarpe_tui_append_child(
-    ctx_ptr: *mut ScarpeTuiContext,
-    parent_id: c_int,
-    child_id: c_int,
-) -> c_int {
-    if ctx_ptr.is_null() {
-        return STATUS_ERR_NULL_PTR;
-    }
-
-    if parent_id < 0 || child_id < 0 {
-        return STATUS_ERR_INVALID_ID;
-    }
+pub extern "C" fn scarpe_tui_append_child(ctx_ptr: *mut ScarpeTuiContext, parent_id: c_int, child_id: c_int) -> c_int {
+    if ctx_ptr.is_null() { return STATUS_ERR_NULL_PTR; }
+    if parent_id < 0 || child_id < 0 { return STATUS_ERR_INVALID_ID; }
 
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
-
         let p_id = parent_id as usize;
         let c_id = child_id as usize;
 
@@ -176,21 +127,14 @@ pub extern "C" fn scarpe_tui_append_child(
         }
         STATUS_OK
     });
-
     result.unwrap_or(STATUS_ERR_PANIC)
 }
 
-// This function retrieves the text content of a node, specifically for EditLine nodes.
-// It returns a pointer to a C-string, which must be freed later to avoid memory leaks.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_get_text(ctx_ptr: *mut ScarpeTuiContext, node_id: c_int) -> *mut c_char {
-    if ctx_ptr.is_null() || node_id < 0 {
-        return null_mut();
-    }
-    
+    if ctx_ptr.is_null() || node_id < 0 { return null_mut(); }
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
-        
         if let Some(node) = ctx.nodes.get(node_id as usize) {
             match &node.node_type {
                 NodeType::EditLine(ref text) | NodeType::EditBox(ref text) => {
@@ -203,27 +147,20 @@ pub extern "C" fn scarpe_tui_get_text(ctx_ptr: *mut ScarpeTuiContext, node_id: c
         }
         null_mut()
     });
-
     result.unwrap_or(null_mut())
 }
 
-// This function frees a C-string that was previously allocated in Rust.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_free_string(s: *mut c_char) {
     if s.is_null() { return; }
     let _ = catch_unwind(|| {
-        unsafe {
-            let _ = CString::from_raw(s); 
-        }
+        unsafe { let _ = CString::from_raw(s); }
     });
 }
 
-// This function retrieves the ID of the last clicked button, if any.
-// It resets the clicked button state after reading.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_get_clicked_button(ctx_ptr: *mut ScarpeTuiContext) -> c_int {
     if ctx_ptr.is_null() { return -1; }
-    
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
         if let Some(id) = ctx.clicked_button.take() {
@@ -231,15 +168,12 @@ pub extern "C" fn scarpe_tui_get_clicked_button(ctx_ptr: *mut ScarpeTuiContext) 
         }
         -1
     });
-
     result.unwrap_or(-1)
 }
+
 #[no_mangle]
 pub extern "C" fn scarpe_tui_get_checkbox_state(ctx_ptr: *mut ScarpeTuiContext, node_id: c_int) -> c_int {
-    if ctx_ptr.is_null() || node_id < 0 {
-        return -1;
-    }
-    
+    if ctx_ptr.is_null() || node_id < 0 { return -1; }
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
         if let Some(node) = ctx.nodes.get(node_id as usize) {
@@ -249,42 +183,19 @@ pub extern "C" fn scarpe_tui_get_checkbox_state(ctx_ptr: *mut ScarpeTuiContext, 
         }
         -1
     });
-
     result.unwrap_or(-1)
 }
 
-// This function sets the style of a node, including foreground color, background color, and text modifiers.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_set_style(
-    ctx_ptr: *mut ScarpeTuiContext,
-    node_id: c_int,
-    fg: c_int,
-    bg: c_int,
-    modifier: c_int,
+    ctx_ptr: *mut ScarpeTuiContext, node_id: c_int, fg: c_int, bg: c_int, modifier: c_int,
 ) -> c_int {
-    if ctx_ptr.is_null() || node_id < 0 {
-        return STATUS_ERR_NULL_PTR;
-    }
-    
+    if ctx_ptr.is_null() || node_id < 0 { return STATUS_ERR_NULL_PTR; }
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
         if let Some(node) = ctx.nodes.get_mut(node_id as usize) {
-            
-            // Map the integer values to crossterm colors and attributes, using Reset for out-of-range values.
-            node.style.fg = if (0..=255).contains(&fg) {
-                crossterm::style::Color::AnsiValue(fg as u8)
-            } else {
-                crossterm::style::Color::Reset
-            };
-
-            // Background color mapping, using Reset for out-of-range values.
-            node.style.bg = if (0..=255).contains(&bg) {
-                crossterm::style::Color::AnsiValue(bg as u8)
-            } else {
-                crossterm::style::Color::Reset
-            };
-
-            // Modifier mapping, using Reset for out-of-range values.
+            node.style.fg = if (0..=255).contains(&fg) { crossterm::style::Color::AnsiValue(fg as u8) } else { crossterm::style::Color::Reset };
+            node.style.bg = if (0..=255).contains(&bg) { crossterm::style::Color::AnsiValue(bg as u8) } else { crossterm::style::Color::Reset };
             node.style.modifier = match modifier {
                 1 => crossterm::style::Attribute::Bold,
                 2 => crossterm::style::Attribute::Underlined,
@@ -292,180 +203,151 @@ pub extern "C" fn scarpe_tui_set_style(
                 4 => crossterm::style::Attribute::Reverse,
                 _ => crossterm::style::Attribute::Reset,
             };
-            
             ctx.needs_redraw = true; 
             return STATUS_OK;
         }
         STATUS_ERR_INVALID_ID
     });
+    result.unwrap_or(STATUS_ERR_PANIC)
+}
 
+#[no_mangle]
+pub extern "C" fn scarpe_tui_update_text(
+    ctx_ptr: *mut ScarpeTuiContext, node_id: c_int, new_text_ptr: *const c_char,
+) -> c_int {
+    if ctx_ptr.is_null() || new_text_ptr.is_null() || node_id < 0 { return STATUS_ERR_NULL_PTR; }
+    let result = std::panic::catch_unwind(|| {
+        let ctx = unsafe { &mut *ctx_ptr };
+        let new_text = unsafe { std::ffi::CStr::from_ptr(new_text_ptr) }.to_string_lossy().into_owned();
+        
+        if let Some(node) = ctx.nodes.get_mut(node_id as usize) {
+            match &mut node.node_type {
+                NodeType::Text(ref mut text) |
+                NodeType::EditLine(ref mut text) |
+                NodeType::EditBox(ref mut text) |
+                NodeType::Button(ref mut text) => {
+                    *text = new_text;
+                    ctx.needs_redraw = true;
+                    return STATUS_OK;
+                }
+                _ => return STATUS_ERR_INVALID_ID,
+            }
+        }
+        STATUS_ERR_INVALID_ID
+    });
     result.unwrap_or(STATUS_ERR_PANIC)
 }
 
 // This function polls for user input events (keyboard and mouse) and updates the TUI context accordingly.
 #[no_mangle]
 pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_int {
-    if ctx_ptr.is_null() {
-        return STATUS_ERR_NULL_PTR;
-    }
+    if ctx_ptr.is_null() { return STATUS_ERR_NULL_PTR; }
 
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
         let mut quit_requested = false;
         let mut state_changed = false; 
         
+        // 1. FASE DI LETTURA: Estraiamo tutti gli eventi e li salviamo.
+        // Questo rilascia immediatamente il "prestito" (borrow) su ctx.event_receiver
+        let mut pending_events = Vec::new();
         if let Some(ref rx) = ctx.event_receiver {
             while let Ok(event) = rx.try_recv() {
-                match event {
-                    Event::Key(key_event) => {
-                        if key_event.kind != KeyEventKind::Press {
-                            continue;
-                        }
-                        
-                        if key_event.code == KeyCode::Esc || 
-                           (key_event.modifiers.contains(KeyModifiers::CONTROL) && key_event.code == KeyCode::Char('c')) {
-                            quit_requested = true;
-                            break; 
-                        }
-
-
-                        if key_event.code == KeyCode::Tab {
-                            let mut inputs = Vec::new();
-                            for (id, node) in ctx.nodes.iter() {
-                                if matches!(node.node_type, NodeType::EditLine(_)) || matches!(node.node_type, NodeType::EditBox(_)) {
-                                    inputs.push(id);
-                                }
-                            }
-                            
-
-                            if !inputs.is_empty() {
-                                let current_idx = inputs.iter().position(|&id| Some(id) == ctx.focused_node).unwrap_or(0);
-                                let next_idx = (current_idx + 1) % inputs.len();
-                                ctx.focused_node = Some(inputs[next_idx]);
-                                state_changed = true; 
-                            }
-                            continue; 
-                        }
-                        
-
-                        if let Some(focus_id) = ctx.focused_node {
-                            if let Some(node) = ctx.nodes.get_mut(focus_id) {
-                                
-
-                                if let NodeType::EditLine(ref mut text) = node.node_type {
-                                    match key_event.code {
-                                        KeyCode::Char(c) if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT => {
-                                            text.push(c);
-                                            state_changed = true;
-                                        }
-                                        KeyCode::Backspace => {
-                                            if text.pop().is_some() {
-                                                state_changed = true; 
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                
-
-                                if let NodeType::EditBox(ref mut text) = node.node_type {
-                                    match key_event.code {
-                                        KeyCode::Char(c) if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT => {
-                                            text.push(c);
-                                            state_changed = true;
-                                        }
-                                        KeyCode::Enter => { 
-                                            text.push('\n');
-                                            state_changed = true;
-                                        }
-                                        KeyCode::Backspace => {
-                                            if text.pop().is_some() {
-                                                state_changed = true; 
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Event::Mouse(mouse_event) => {
-                        match mouse_event.kind {
-                            MouseEventKind::Down(MouseButton::Left) => {
-                                let mx = mouse_event.column;
-                                let my = mouse_event.row;
-
-                                let absolute_y = my.saturating_add(ctx.scroll_offset_y);
-
-                                let mut clicked_button_id = None;
-                                let mut clicked_checkbox_id = None;
-
-                                for (id, node) in ctx.nodes.iter() {
-                                    let l = node.layout;
-                                    if mx >= l.x && mx < l.x + l.width && absolute_y >= l.y && absolute_y < l.y + l.height {
-                                        if matches!(node.node_type, NodeType::Button(_)) {
-                                            clicked_button_id = Some(id);
-                                            break;
-                                        } else if matches!(node.node_type, NodeType::Checkbox(_)) {
-                                            clicked_checkbox_id = Some(id);
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                if let Some(id) = clicked_button_id {
-                                    ctx.clicked_button = Some(id);
-                                    return STATUS_CLICKED; 
-                                }
-
-                                if let Some(id) = clicked_checkbox_id {
-                                    if let Some(node) = ctx.nodes.get_mut(id) {
-                                        if let NodeType::Checkbox(ref mut state) = node.node_type {
-                                            *state = !*state;
-                                            state_changed = true; 
-                                        }
-                                    }
-                                }
-                            }
-                            MouseEventKind::ScrollUp => {
-                                if ctx.scroll_offset_y > 0 {
-                                    ctx.scroll_offset_y = ctx.scroll_offset_y.saturating_sub(1);
-                                    state_changed = true;
-                                }
-                            }
-                            MouseEventKind::ScrollDown => {
-                                let mut max_content_height = 0;
-                                if let Some(root_id) = ctx.root_id {
-                                    if let Some(root) = ctx.nodes.get(root_id) {
-                                        max_content_height = root.layout.height;
-                                    }
-                                }
-                                
-                                let term_height = ctx.next_buffer.height;
-                                let max_scroll = max_content_height.saturating_sub(term_height);
-
-                                if ctx.scroll_offset_y < max_scroll {
-                                    ctx.scroll_offset_y = ctx.scroll_offset_y.saturating_add(1);
-                                    state_changed = true;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    Event::Resize(_, _) => {
-                        state_changed = true;
-                    }
-                    _ => {}
-                }
+                pending_events.push(event);
             }
         }
         
-        if state_changed {
-            ctx.needs_redraw = true;
-        }
+        // 2. FASE DI SCRITTURA/LOGICA: Ora ctx è completamente libero di essere mutato!
+        for event in pending_events {
+            match event {
+                Event::Key(key_event) => {
+                    if key_event.kind != KeyEventKind::Press { continue; }
+                    
+                    if key_event.code == KeyCode::Esc || 
+                       (key_event.modifiers.contains(KeyModifiers::CONTROL) && key_event.code == KeyCode::Char('c')) {
+                        quit_requested = true;
+                        break; 
+                    }
 
+                    if key_event.code == KeyCode::Tab {
+                        let mut inputs = Vec::new();
+                        for (id, node) in ctx.nodes.iter() {
+                            if matches!(node.node_type, NodeType::EditLine(_)) || matches!(node.node_type, NodeType::EditBox(_)) {
+                                inputs.push(id);
+                            }
+                        }
+                        if !inputs.is_empty() {
+                            let current_idx = inputs.iter().position(|&id| Some(id) == ctx.focused_node).unwrap_or(0);
+                            let next_idx = (current_idx + 1) % inputs.len();
+                            ctx.focused_node = Some(inputs[next_idx]);
+                            state_changed = true; 
+                        }
+                        continue; 
+                    }
+                    
+                    if let Some(focus_id) = ctx.focused_node {
+                        if let Some(node) = ctx.nodes.get_mut(focus_id) {
+                            if let NodeType::EditLine(ref mut text) = node.node_type {
+                                match key_event.code {
+                                    KeyCode::Char(c) if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT => {
+                                        text.push(c);
+                                        state_changed = true;
+                                    }
+                                    KeyCode::Backspace => {
+                                        if text.pop().is_some() { state_changed = true; }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if let NodeType::EditBox(ref mut text) = node.node_type {
+                                match key_event.code {
+                                    KeyCode::Char(c) if key_event.modifiers.is_empty() || key_event.modifiers == KeyModifiers::SHIFT => {
+                                        text.push(c);
+                                        state_changed = true;
+                                    }
+                                    KeyCode::Enter => { 
+                                        text.push('\n');
+                                        state_changed = true;
+                                    }
+                                    KeyCode::Backspace => {
+                                        if text.pop().is_some() { state_changed = true; }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+                Event::Mouse(mouse_event) => {
+                    let mx = mouse_event.column;
+                    let my = mouse_event.row;
+                    let mut click = false;
+                    let mut scroll_dir = 0;
+
+                    match mouse_event.kind {
+                        MouseEventKind::Down(MouseButton::Left) => { click = true; }
+                        MouseEventKind::ScrollUp => { scroll_dir = -1; }
+                        MouseEventKind::ScrollDown => { scroll_dir = 1; }
+                        _ => {}
+                    }
+
+                    // Ora chiamare handle_mouse è perfettamente legale per il Borrow Checker!
+                    if click || scroll_dir != 0 {
+                        let (changed, btn_id) = ctx.handle_mouse(mx, my, click, scroll_dir);
+                        if changed { state_changed = true; }
+                        if let Some(id) = btn_id {
+                            ctx.clicked_button = Some(id);
+                            return STATUS_CLICKED;
+                        }
+                    }
+                }
+                Event::Resize(_, _) => { state_changed = true; }
+                _ => {}
+            }
+        }
+        
+        if state_changed { ctx.needs_redraw = true; }
         if quit_requested { STATUS_QUIT } else { STATUS_OK }
     });
-
     result.unwrap_or(STATUS_ERR_PANIC)
 }
