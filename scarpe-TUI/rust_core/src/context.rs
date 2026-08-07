@@ -158,14 +158,14 @@ impl ScarpeTuiContext {
         }
     }
 
-    /// Computes the layout for a specific node and its children.
-    /// Determines the position and size of the node based on its type and the available space.
+    // Recursively computes the layout for a node and its children based on the node type.
+    // Returns the computed width and height of the node.
     fn layout_node(&mut self, id: NodeId, start_x: u16, start_y: u16, max_width: u16) -> ComputedLayout {
         let (node_type, children) = {
             if let Some(node) = self.nodes.get(id) {
                 (node.node_type.clone(), node.children.clone())
             } else {
-                return ComputedLayout::default(); // Return default layout if the node does not exist
+                return ComputedLayout::default();
             }
         };
 
@@ -173,17 +173,48 @@ impl ScarpeTuiContext {
             NodeType::Root | NodeType::Stack => self.layout_stack(children, start_x, start_y, max_width),
             NodeType::Flow => self.layout_flow(children, start_x, start_y, max_width),
             NodeType::Border => self.layout_border(children, start_x, start_y, max_width),
-            NodeType::Checkbox(_) => (3, 1), // Fixed size for checkboxes
+            NodeType::Checkbox(_) => (3, 1),
             NodeType::Text(ref text) | NodeType::EditLine(ref text) | NodeType::Button(ref text) => self.layout_simple_text(&node_type, text, max_width),
             NodeType::EditBox(ref text) => self.layout_edit_box(text, max_width),
             NodeType::DockBottom => self.layout_dock_bottom(children, start_x, max_width),
-            NodeType::ScrollArea { scroll_offset_y: _, max_height } => self.layout_scroll_area(children, start_x, start_y, max_width, max_height),
+            NodeType::ScrollArea { scroll_offset_y: _, max_height } => {
+                let mut actual_height = max_height;
+                if actual_height == 0 {
+                    let (_, term_height) = crossterm::terminal::size().unwrap_or((80, 24));
+                    
+                    let mut dock_h = 6;
+                    let mut dock_id_opt = None;
+                    
+                    if let Some(root_id) = self.root_id {
+                        if let Some(root) = self.nodes.get(root_id) {
+                            for &cid in &root.children {
+                                if let Some(child) = self.nodes.get(cid) {
+                                    if matches!(child.node_type, NodeType::DockBottom) {
+                                        dock_id_opt = Some(cid);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if let Some(dock_id) = dock_id_opt {
+                        let dl = self.layout_node(dock_id, start_x, 0, max_width);
+                        dock_h = dl.height;
+                    }
+                    
+                    actual_height = term_height.saturating_sub(start_y).saturating_sub(dock_h).saturating_sub(2);
+                }
+                self.layout_scroll_area(id, children, start_x, start_y, max_width, actual_height)
+            },
         };
 
         let final_layout = ComputedLayout { x: start_x, y: start_y, width: computed_width, height: computed_height };
+        
         if let Some(node) = self.nodes.get_mut(id) {
             node.layout = final_layout;
         }
+        
         final_layout
     }
 
@@ -320,10 +351,24 @@ impl ScarpeTuiContext {
         (max_width, comp_h)
     }
     
-    fn layout_scroll_area(&mut self, children: Vec<NodeId>, start_x: u16, start_y: u16, max_width: u16, max_height: u16) -> (u16, u16) {
-        // Calculates the layout for a scrollable area.
-        // Ensures the children nodes fit within the specified maximum height.
-        self.layout_stack(children, start_x, start_y, max_width);
+    // Calculates the layout for scrollable areas, determining the maximum scroll offset based on the content height and the specified maximum height.
+    fn layout_scroll_area(&mut self, id: NodeId, children: Vec<NodeId>, start_x: u16, start_y: u16, max_width: u16, max_height: u16) -> (u16, u16) {
+        let (_, computed_height) = self.layout_stack(children, start_x, start_y, max_width);
+        let max_scroll = computed_height.saturating_sub(max_height);
+
+        if let Some(node) = self.nodes.get_mut(id) {
+            if let NodeType::ScrollArea { ref mut scroll_offset_y, .. } = node.node_type {
+                if max_scroll == 0 {
+                    // Se il testo è poco, azzeriamo lo scorrimento
+                    *scroll_offset_y = 0;
+                } else if *scroll_offset_y > max_scroll {
+                    // Se l'utente ridimensiona la finestra, limitiamo lo scorrimento
+                    // al nuovo massimo consentito senza forzarlo se non serve
+                    *scroll_offset_y = max_scroll;
+                }
+            }
+        }
+
         (max_width, max_height)
     }
     
@@ -369,8 +414,6 @@ impl ScarpeTuiContext {
     fn traverse_mouse(
         &mut self, id: NodeId, mx: i32, my: i32, click: bool, scroll_dir: i32, clip: Option<(i32, i32, i32, i32)>, offset_y: i32,
     ) -> (bool, Option<NodeId>, Option<NodeId>) {
-        // Traverses the virtual DOM to handle mouse interactions.
-        // Determines which node was clicked or scrolled and updates the state accordingly.
         let (node_type, layout, children) = {
             if let Some(node) = self.nodes.get(id) {
                 (node.node_type.clone(), node.layout, node.children.clone())
@@ -378,9 +421,9 @@ impl ScarpeTuiContext {
         };
     
         let (current_offset, current_clip) = match node_type {
-            NodeType::ScrollArea { scroll_offset_y, max_height } => {
+            NodeType::ScrollArea { scroll_offset_y, .. } => {
                 let cy1 = layout.y as i32 - offset_y;
-                let cy2 = cy1 + max_height as i32;
+                let cy2 = cy1 + layout.height as i32;
                 let clip_rect = Some((layout.x as i32, cy1, (layout.x + layout.width) as i32, cy2));
                 (scroll_offset_y as i32, clip_rect)
             }
@@ -409,7 +452,7 @@ impl ScarpeTuiContext {
     
         if in_bounds {
             if scroll_dir != 0 {
-                if let NodeType::ScrollArea { scroll_offset_y, max_height } = node_type {
+                if let NodeType::ScrollArea { scroll_offset_y, .. } = node_type {
                     let mut max_bottom = layout.y;
                     if let Some(node) = self.nodes.get(id) {
                         for &cid in &node.children {
@@ -421,7 +464,7 @@ impl ScarpeTuiContext {
                     }
     
                     let content_height = max_bottom.saturating_sub(layout.y);
-                    let max_scroll = content_height.saturating_sub(max_height);
+                    let max_scroll = content_height.saturating_sub(layout.height);
     
                     let mut new_offset = scroll_offset_y;
                     if scroll_dir < 0 && new_offset > 0 {
@@ -459,6 +502,7 @@ impl ScarpeTuiContext {
         }
         (state_changed, clicked_btn, new_focus)
     }
+
     fn start_drawing(&mut self, root_id: NodeId) {
         // Resets the cursor position for each frame and starts drawing the root node recursively.
         self.cursor_pos = None;
@@ -466,22 +510,18 @@ impl ScarpeTuiContext {
     }
     
     fn draw_node_recursive(&mut self, id: NodeId, clip: Option<(i32, i32, i32, i32)>, offset_y: i32) {
-        // Recursively draws a node and its children.
-        // Handles different node types and applies clipping and offset adjustments.
-    
         let (node_type, layout, children, style) = {
             if let Some(node) = self.nodes.get(id) {
                 (node.node_type.clone(), node.layout, node.children.clone(), node.style)
             } else {
-                return; // Exit if the node does not exist
+                return;
             }
         };
     
-        // Adjusts the clipping and offset based on the node type.
         let (current_offset, current_clip) = match node_type {
-            NodeType::ScrollArea { scroll_offset_y, max_height } => {
+            NodeType::ScrollArea { scroll_offset_y, .. } => {
                 let cy1 = layout.y as i32 - offset_y;
-                let cy2 = cy1 + max_height as i32;
+                let cy2 = cy1 + layout.height as i32;
                 let clip_rect = Some((layout.x as i32, cy1, (layout.x + layout.width) as i32, cy2));
                 (scroll_offset_y as i32, clip_rect)
             }
@@ -489,7 +529,6 @@ impl ScarpeTuiContext {
             _ => (offset_y, clip),
         };
     
-        // Draws the node based on its type.
         match node_type {
             NodeType::Text(ref text) => self.draw_text(text, &layout, current_offset, style, current_clip),
             NodeType::EditLine(ref text) => self.draw_edit_line(id, text, &layout, current_offset, style, current_clip),
@@ -500,33 +539,53 @@ impl ScarpeTuiContext {
             _ => {}
         }
     
-        // Recursively draws all child nodes.
         for child_id in children {
             self.draw_node_recursive(child_id, current_clip, current_offset);
         }
     }
     
     fn draw_text(&mut self, text: &str, layout: &ComputedLayout, offset_y: i32, style: NodeStyle, clip: Option<(i32, i32, i32, i32)>) {
-        // Draws a text node, handling line wrapping and clipping.
         let mut cursor_x = layout.x as i32;
         let mut cursor_y = layout.y as i32 - offset_y;
         let max_x = (layout.x + layout.width) as i32;
-    
-        for ch in text.chars() {
+        
+        let mut current_style = style; 
+        let mut in_bold = false;
+        
+
+        let mut chars = text.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+
+            if ch == '*' && chars.peek() == Some(&'*') {
+                chars.next(); 
+                in_bold = !in_bold; 
+                
+
+                current_style.modifier = if in_bold {
+                    Attribute::Bold
+                } else {
+                    style.modifier 
+                };
+                continue; 
+            }
+
             if ch == '\n' {
                 cursor_x = layout.x as i32;
                 cursor_y += 1;
             } else {
                 if cursor_x < max_x {
-                    self.next_buffer.set_char_clamped(cursor_x, cursor_y, ch, style, clip);
+                    self.next_buffer.set_char_clamped(cursor_x, cursor_y, ch, current_style, clip);
                     cursor_x += 1;
                 } else {
+                    // Line wrap
                     cursor_x = layout.x as i32;
                     cursor_y += 1;
-                    self.next_buffer.set_char_clamped(cursor_x, cursor_y, ch, style, clip);
+                    self.next_buffer.set_char_clamped(cursor_x, cursor_y, ch, current_style, clip);
                     cursor_x += 1;
                 }
             }
+            
             if cursor_y >= (layout.y + layout.height) as i32 - offset_y {
                 break;
             }

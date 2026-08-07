@@ -6,7 +6,7 @@ use std::ptr::{self, null_mut};
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use crossterm::style::Attribute::{Bold, Italic, Reset, Reverse, Underlined};
 use crossterm::style::Color::AnsiValue;
-use crate::{STATUS_ERR_NULL_PTR, STATUS_ERR_PANIC, STATUS_OK, STATUS_QUIT, STATUS_ERR_INVALID_ID, STATUS_CLICKED};
+use crate::{STATUS_ERR_NULL_PTR, STATUS_ERR_PANIC, STATUS_OK, STATUS_ERR_INVALID_ID};
 
 /// Creates a new node in the virtual DOM.
 /// The node type and optional text content are specified by the caller.
@@ -288,15 +288,15 @@ pub extern "C" fn scarpe_tui_update_text(
 #[no_mangle]
 pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_int {
     if ctx_ptr.is_null() {
-        return STATUS_ERR_NULL_PTR;
+        return -1;
     }
 
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
-        let mut quit_requested = false; // Flag to indicate if the user requested to quit
-        let mut state_changed = false; // Flag to indicate if the state of the TUI changed
+        let mut quit_requested = false;
+        let mut state_changed = false;
+        let mut submitted = false;
 
-        // Collect all pending events from the event receiver
         let mut pending_events = Vec::new();
         if let Some(ref rx) = ctx.event_receiver {
             while let Ok(event) = rx.try_recv() {
@@ -304,16 +304,13 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
             }
         }
 
-        // Process each event and update the TUI context
         for event in pending_events {
             match event {
                 Event::Key(key_event) => {
-                    // Handle key press events
                     if key_event.kind != KeyEventKind::Press {
                         continue;
                     }
 
-                    // Quit the application on ESC or Ctrl+C
                     if key_event.code == KeyCode::Esc
                         || (key_event.modifiers.contains(KeyModifiers::CONTROL)
                             && key_event.code == KeyCode::Char('c'))
@@ -322,29 +319,65 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                         break;
                     }
 
-                    // Handle Tab key to cycle focus between input fields
-                    if key_event.code == KeyCode::Tab {
-                        let mut inputs = Vec::new();
-                        for (id, node) in ctx.nodes.iter() {
-                            if matches!(node.node_type, NodeType::EditLine(_))
-                                || matches!(node.node_type, NodeType::EditBox(_))
-                            {
-                                inputs.push(id);
+                    match key_event.code {
+                        KeyCode::Up => {
+                            ctx.scroll_offset_y = 1;
+                            for (_, node) in ctx.nodes.iter_mut() {
+                                if let NodeType::ScrollArea { ref mut scroll_offset_y, .. } = node.node_type {
+                                    *scroll_offset_y = scroll_offset_y.saturating_sub(1);
+                                    state_changed = true;
+                                }
                             }
                         }
-                        if !inputs.is_empty() {
-                            let current_idx = inputs
-                                .iter()
-                                .position(|&id| Some(id) == ctx.focused_node)
-                                .unwrap_or(0);
-                            let next_idx = (current_idx + 1) % inputs.len();
-                            ctx.focused_node = Some(inputs[next_idx]);
-                            state_changed = true;
+                        KeyCode::Down => {
+                            ctx.scroll_offset_y = 1;
+                            for (_, node) in ctx.nodes.iter_mut() {
+                                if let NodeType::ScrollArea { ref mut scroll_offset_y, .. } = node.node_type {
+                                    *scroll_offset_y = scroll_offset_y.saturating_add(1);
+                                    state_changed = true;
+                                }
+                            }
                         }
-                        continue;
+                        KeyCode::PageUp => {
+                            ctx.scroll_offset_y = 1;
+                            for (_, node) in ctx.nodes.iter_mut() {
+                                if let NodeType::ScrollArea { ref mut scroll_offset_y, .. } = node.node_type {
+                                    *scroll_offset_y = scroll_offset_y.saturating_sub(5);
+                                    state_changed = true;
+                                }
+                            }
+                        }
+                        KeyCode::PageDown => {
+                            ctx.scroll_offset_y = 1;
+                            for (_, node) in ctx.nodes.iter_mut() {
+                                if let NodeType::ScrollArea { ref mut scroll_offset_y, .. } = node.node_type {
+                                    *scroll_offset_y = scroll_offset_y.saturating_add(5);
+                                    state_changed = true;
+                                }
+                            }
+                        }
+                        KeyCode::Tab => {
+                            let mut inputs = Vec::new();
+                            for (id, node) in ctx.nodes.iter() {
+                                if matches!(node.node_type, NodeType::EditLine(_))
+                                    || matches!(node.node_type, NodeType::EditBox(_))
+                                {
+                                    inputs.push(id);
+                                }
+                            }
+                            if !inputs.is_empty() {
+                                let current_idx = inputs
+                                    .iter()
+                                    .position(|&id| Some(id) == ctx.focused_node)
+                                    .unwrap_or(0);
+                                let next_idx = (current_idx + 1) % inputs.len();
+                                ctx.focused_node = Some(inputs[next_idx]);
+                                state_changed = true;
+                            }
+                        }
+                        _ => {}
                     }
 
-                    // Handle typing in focused EditLine or EditBox nodes
                     if let Some(focus_id) = ctx.focused_node {
                         if let Some(node) = ctx.nodes.get_mut(focus_id) {
                             if let NodeType::EditLine(ref mut text) = node.node_type {
@@ -361,6 +394,11 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                                             state_changed = true;
                                         }
                                     }
+                                    KeyCode::Enter => {
+                                        ctx.clicked_button = Some(focus_id);
+                                        ctx.scroll_offset_y = 0;
+                                        submitted = true;
+                                    }
                                     _ => {}
                                 }
                             }
@@ -374,8 +412,14 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                                         state_changed = true;
                                     }
                                     KeyCode::Enter => {
-                                        text.push('\n');
-                                        state_changed = true;
+                                        if key_event.modifiers.contains(KeyModifiers::SHIFT) || key_event.modifiers.contains(KeyModifiers::ALT) {
+                                            text.push('\n');
+                                            state_changed = true;
+                                        } else {
+                                            ctx.clicked_button = Some(focus_id);
+                                            ctx.scroll_offset_y = 0;
+                                            submitted = true;
+                                        }
                                     }
                                     KeyCode::Backspace => {
                                         if text.pop().is_some() {
@@ -389,7 +433,6 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                     }
                 }
                 Event::Mouse(mouse_event) => {
-                    // Handle mouse events (clicks and scrolls)
                     let mx = mouse_event.column;
                     let my = mouse_event.row;
                     let mut click = false;
@@ -401,14 +444,15 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                         }
                         MouseEventKind::ScrollUp => {
                             scroll_dir = -1;
+                            ctx.scroll_offset_y = 1;
                         }
                         MouseEventKind::ScrollDown => {
                             scroll_dir = 1;
+                            ctx.scroll_offset_y = 1;
                         }
                         _ => {}
                     }
 
-                    // Handle mouse interactions with the virtual DOM
                     if click || scroll_dir != 0 {
                         let (changed, btn_id) = ctx.handle_mouse(mx, my, click, scroll_dir);
                         if changed {
@@ -416,30 +460,30 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                         }
                         if let Some(id) = btn_id {
                             ctx.clicked_button = Some(id);
-                            return STATUS_CLICKED; // Return clicked button status
+                            ctx.scroll_offset_y = 0;
+                            return 2;
                         }
                     }
                 }
                 Event::Resize(_, _) => {
-                    // Handle terminal resize events
                     state_changed = true;
                 }
                 _ => {}
             }
         }
 
-        // Mark the context for redraw if the state changed
         if state_changed {
             ctx.needs_redraw = true;
         }
 
-        // Return appropriate status based on user actions
         if quit_requested {
-            STATUS_QUIT
+            1
+        } else if submitted {
+            2
         } else {
-            STATUS_OK
+            0
         }
     });
 
-    result.unwrap_or(STATUS_ERR_PANIC) // Handle panics gracefully
+    result.unwrap_or(-2)
 }

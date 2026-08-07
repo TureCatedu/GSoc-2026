@@ -24,6 +24,11 @@ module Scarpe
     def text
       @app.get_node_text(@id)
     end
+
+    # Updates the text of this EditLine in the Rust backend.
+    def text=(new_text)
+      @app.update_node_text(@id, new_text)
+    end
   end
 
   # Represents a multi-line editable text box in the TUI.
@@ -37,6 +42,12 @@ module Scarpe
     def text
       @app.get_node_text(@id)
     end
+
+    # Updates the text of this EditBox in the Rust backend.
+    def text=(new_text)
+      @app.update_node_text(@id, new_text)
+    end
+
   end
 
   # Represents a checkbox in the TUI.
@@ -141,6 +152,15 @@ module Scarpe
       @node_stack.pop
     end
 
+    def append_to(parent_id, &block)
+
+      @node_stack.push(parent_id)
+      
+      instance_eval(&block) if block_given?
+      
+      @node_stack.pop
+    end
+
     # Creates a text node in the TUI with optional styling and returns a TextNode object for dynamic updates.
     def para(text, stroke: nil, fill: nil, modifier: nil)
       para_id = create_tui_node(NODE_TYPES[:text], text.to_s)
@@ -150,20 +170,30 @@ module Scarpe
     end
 
     # Creates an editable text field in the TUI with optional styling.
-    def edit_line(initial_text = "", stroke: nil, fill: nil, modifier: nil)
+    def edit_line(initial_text = "", stroke: nil, fill: nil, modifier: nil, &block)
       id = create_tui_node(NODE_TYPES[:edit_line], initial_text.to_s)
       link_tui_nodes(@node_stack.last, id)
       
       apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
+      
+      if block_given?
+        @callbacks[id] = { parent: @node_stack.last, block: block }
+      end
+      
       EditLine.new(self, id)
     end
 
-    # Creates a multi-line editable text box in the TUI with optional styling.
-    def edit_box(initial_text = "", stroke: nil, fill: nil, modifier: nil)
+    # Creates a multi-line editable text box in the TUI with optional styling. 
+    def edit_box(initial_text = "", stroke: nil, fill: nil, modifier: nil, &block)
       id = create_tui_node(NODE_TYPES[:edit_box], initial_text.to_s)
       link_tui_nodes(@node_stack.last, id)
       
       apply_style(id, stroke: stroke, fill: fill, modifier: modifier)
+      
+      if block_given?
+        @callbacks[id] = { parent: @node_stack.last, block: block }
+      end
+      
       EditBox.new(self, id)
     end
 
@@ -300,6 +330,8 @@ module Scarpe
 
         status_code = ScarpeTuiBackend.scarpe_tui_render(@ctx_ptr)
         handle_rust_status!(status_code)
+
+        sleep 0.01
       end
     end
 

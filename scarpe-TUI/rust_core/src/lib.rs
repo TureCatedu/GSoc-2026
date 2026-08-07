@@ -19,8 +19,6 @@ const STATUS_ERR_NULL_PTR: c_int = -1; // Null pointer error
 const STATUS_ERR_PANIC: c_int = -2; // Panic occurred during execution
 const STATUS_ERR_IO: c_int = -3; // Input/output error
 const STATUS_ERR_INVALID_ID: c_int = -4; // Invalid node ID error
-const STATUS_QUIT: c_int = 1; // Quit signal
-const STATUS_CLICKED: c_int = 2; // Button clicked signal
 
 pub type NodeId = usize; // Type alias for node identifiers
 
