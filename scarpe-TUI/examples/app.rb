@@ -172,21 +172,38 @@ Scarpe.app(true, title: "Scarpe AI") do
         file_path = user_text.sub("/read ", "").strip
         
         if File.directory?(file_path)
-          files = Dir.glob("#{file_path}/**/*").reject { |f| File.directory?(f) || f.include?(".git") }
+          ignore_dirs = [".git", "node_modules", "target", "build", "vendor", "dist", ".next", ".idea"]
+          
+          files = Dir.glob("#{file_path}/**/*").reject do |f| 
+            File.directory?(f) || ignore_dirs.any? { |ig| f.include?("/#{ig}/") || f.start_with?("#{ig}/") }
+          end
+          
           file_contents = files.map do |f|
-            begin
-              content = File.read(f)
-              "--- File: #{f} ---\n#{content}\n"
-            rescue
-              "--- File: #{f} ---\n[Binary or unreadable]\n"
+            if File.size(f) > 150_000
+              "--- File: #{f} ---\n[Skipped: File too large (>150KB)]\n"
+            else
+              begin
+                content = File.read(f, encoding: 'UTF-8', invalid: :replace, undef: :replace, replace: '')
+                if content.include?("\u0000")
+                  "--- File: #{f} ---\n[Skipped: Binary file]\n"
+                else
+                  "--- File: #{f} ---\n#{content}\n"
+                end
+              rescue
+                "--- File: #{f} ---\n[Unreadable file]\n"
+              end
             end
           end.join("\n")
           
           user_text = "I have analyzed the directory `#{file_path}`. Here are the files:\n\n#{file_contents}\n\nYou can modify or create files (even in new subdirectories)."
           display_text = "Command: Read directory #{file_path} (#{files.count} files)"
         elsif File.exist?(file_path)
-          file_content = File.read(file_path)
-          user_text = "I have read the file `#{file_path}`. Here is the content:\n\n```\n#{file_content}\n```\n\nAwaiting instructions."
+          begin
+            file_content = File.read(file_path, encoding: 'UTF-8', invalid: :replace, undef: :replace, replace: '')
+            user_text = "I have read the file `#{file_path}`. Here is the content:\n\n```\n#{file_content}\n```\n\nAwaiting instructions."
+          rescue
+            user_text = "I could not read the file `#{file_path}` due to an encoding error."
+          end
           display_text = "Command: Read #{file_path}"
         else
           user_text = "Cannot find: #{file_path}"
@@ -214,7 +231,7 @@ Scarpe.app(true, title: "Scarpe AI") do
         border stroke: "dark_gray" do
           stack do
             para " AI ", stroke: "white", fill: "dark_gray", modifier: "bold"
-            ai_node = para "AI is typing...", stroke: "dark_gray"
+            ai_node = para "⠋ Thinking...", stroke: "white"
             para ""
           end
         end
@@ -224,6 +241,17 @@ Scarpe.app(true, title: "Scarpe AI") do
         current_text = ""
         ai_full_response = ""
         first_token_received = false
+        
+        spinner_thread = Thread.new do
+          frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+          i = 0
+          while !first_token_received
+            ai_node.text = "#{frames[i % frames.length]} Thinking..."
+            i += 1
+            sleep 0.08
+          end
+        end
+        
         uri = nil
         request = nil
         
@@ -286,8 +314,9 @@ Scarpe.app(true, title: "Scarpe AI") do
 
                         if content
                           if !first_token_received
-                            ai_node.text = ""
                             first_token_received = true
+                            spinner_thread.kill if spinner_thread.alive?
+                            ai_node.text = ""
                           end
 
                           current_text += content
@@ -300,6 +329,8 @@ Scarpe.app(true, title: "Scarpe AI") do
                   end
                 end
               else
+                first_token_received = true
+                spinner_thread.kill if spinner_thread.alive?
                 error_data = JSON.parse(response.body) rescue nil
                 err_msg = error_data ? (error_data.dig("error", "message") || response.body) : response.body
                 ai_full_response = "[API Error #{response.code}] #{err_msg}"
@@ -308,6 +339,8 @@ Scarpe.app(true, title: "Scarpe AI") do
             end
           end
         rescue StandardError => e
+          first_token_received = true
+          spinner_thread.kill if spinner_thread.alive?
           ai_full_response = "[Network Error] #{e.message}"
           ai_node.text = current_text + ai_full_response
         end
