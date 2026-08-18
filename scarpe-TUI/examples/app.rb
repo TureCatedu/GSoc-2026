@@ -107,7 +107,7 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
   end
 end
 
-api_key = config["api_key"]
+api_key = config.fetch("api_key")
 model_name = config["model"]
 provider = config["provider"]
 theme_color = config["theme_color"] || "cyan"
@@ -373,8 +373,13 @@ Scarpe.app(true, title: "Scarpe AI") do
           Net::HTTP.start(uri.host, uri.port, use_ssl: true, read_timeout: 300, open_timeout: 60) do |http|
             http.request(request) do |response|
               if response.code.to_i == 200
+                sse_buffer = +""
                 response.read_body do |chunk|
-                  chunk.split("\n").each do |line|
+                  sse_buffer << chunk
+                  complete_lines = sse_buffer.split("\n", -1)
+                  sse_buffer = complete_lines.pop.to_s
+
+                  complete_lines.each do |line|
                     if line.start_with?("data: ") && line != "data: [DONE]"
                       data_str = line.sub("data: ", "").strip
                       next if data_str.empty?

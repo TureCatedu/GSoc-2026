@@ -21,7 +21,9 @@ class FfiContractTest < Minitest::Test
   end
 
   def test_manifest_uses_cargo_filename
-    assert File.file?(File.join(ROOT, "rust_core", "Cargo.toml"))
-    refute File.file?(File.join(ROOT, "rust_core", "cargo.toml"))
+    manifest_names = Dir.children(File.join(ROOT, "rust_core"))
+
+    assert_includes manifest_names, "Cargo.toml"
+    refute_includes manifest_names, "cargo.toml"
   end
 end
