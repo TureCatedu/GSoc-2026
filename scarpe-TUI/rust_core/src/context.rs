@@ -832,7 +832,10 @@ impl ScarpeTuiContext {
         }
 
         if matches!(node_type, NodeType::ScrollArea { .. }) {
-            self.draw_scrollbar(id, &layout, current_offset, style, clip);
+            // The scrollbar belongs to this viewport: use the viewport clip,
+            // not the parent's clip, so nested scroll areas cannot paint
+            // outside their own bounds.
+            self.draw_scrollbar(id, &layout, current_offset, style, current_clip);
         }
     }
 

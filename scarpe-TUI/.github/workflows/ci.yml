@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ruby:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: false
+      - name: Install Ruby dependencies
+        run: gem install ffi
+      - name: Ruby syntax and contract tests
+        run: |
+          ruby -c examples/app.rb
+          ruby -c lib/scarpe_tui.rb
+          ruby -c ext/mylib.rb
+          ruby -c build_cli.rb
+          ruby -Itest test/ffi_contract_test.rb
+          ruby -Itest test/app_security_contract_test.rb
+
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Check Rust crate
+        run: cargo check --manifest-path rust_core/Cargo.toml
+      - name: Check formatting
+        run: cargo fmt --manifest-path rust_core/Cargo.toml -- --check

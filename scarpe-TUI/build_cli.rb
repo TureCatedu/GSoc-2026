@@ -6,7 +6,7 @@ require "rbconfig"
 ROOT = File.expand_path(__dir__)
 
 library_filename =
-  case RbConfig::CONFIG["host_os"]
+  case RbConfig::CONFIG.fetch("host_os", "")
   when /darwin/
     "librust_core.dylib"
   when /linux/
@@ -24,7 +24,7 @@ app_path = File.join(ROOT, "examples", "app.rb")
 
 unless File.file?(release_library)
   warn "Error: Compile Rust project first with:"
-  warn "  cd rust_core && cargo build --release"
+  warn "  cargo build --release --manifest-path rust_core/Cargo.toml"
   exit 1
 end
 
@@ -32,42 +32,20 @@ puts "Bundling Scarpe AI CLI..."
 
 library_bytes = File.binread(release_library)
 library_b64 = Base64.strict_encode64(library_bytes)
-library_size = library_bytes.bytesize
 library_digest = Digest::SHA256.hexdigest(library_bytes)
 
-mylib_src = File.read(mylib_path)
-  .gsub(/require ["']ffi["']\s*/, "")
-  .gsub(/require ["']rbconfig["']\s*/, "")
-  .gsub(/module ScarpeTuiBackend.*?^end/m, <<~RUBY.chomp)
-    module ScarpeTuiBackend
-      extend FFI::Library
-      ffi_lib LIBRARY_PATH
+mylib_src = File.readlines(mylib_path).reject do |line|
+  line.match?(/\Arequire ["'](?:ffi|rbconfig)["']\s*\z/)
+end.join
 
-      attach_function :scarpe_tui_init, [:bool], :pointer
-      attach_function :scarpe_tui_free_context, [:pointer], :void
-      attach_function :scarpe_tui_render, [:pointer], :int
-      attach_function :scarpe_tui_create_node, [:pointer, :int, :string], :int
-      attach_function :scarpe_tui_append_child, [:pointer, :int, :int], :int
-      attach_function :scarpe_tui_poll_events, [:pointer], :int
-      attach_function :scarpe_tui_get_text, [:pointer, :int], :pointer
-      attach_function :scarpe_tui_free_string, [:uint64], :void
-      attach_function :scarpe_tui_get_clicked_button, [:pointer], :int
-      attach_function :scarpe_tui_get_checkbox_state, [:pointer, :int], :int
-      attach_function :scarpe_tui_set_style, [:pointer, :int, :int, :int, :int], :int
-      attach_function :scarpe_tui_update_text, [:pointer, :int, :string], :int
-    end
-  RUBY
+scarpe_tui_src = File.readlines(scarpe_tui_path).reject do |line|
+  line.match?(/\Arequire_relative .*?\n\z/)
+end.join
 
-scarpe_tui_src = File.read(scarpe_tui_path)
-  .gsub(/require_relative .*?\n/, "")
-
-app_src = File.read(app_path)
-  .gsub(/require_relative .*?\n/, "")
-  .gsub(/require ["']net\/http["']\n/, "")
-  .gsub(/require ["']json["']\n/, "")
-  .gsub(/require ["']fileutils["']\n/, "")
-  .gsub(/exec\("ruby \#\{__FILE__\}", "--setup"\)/, 'exec(RbConfig.ruby, __FILE__, "--setup")')
-  .gsub(/exec\("ruby \#\{__FILE__\}"\)/, "exec(RbConfig.ruby, __FILE__)")
+app_src = File.readlines(app_path).reject do |line|
+  line.match?(/\Arequire_relative .*?\n\z/) ||
+    line.match?(/\Arequire ["'](?:net\/http|json|fileutils|open3)["']\s*\z/)
+end.join
 
 template = <<~RUBY
   #!/usr/bin/env ruby
@@ -77,6 +55,7 @@ template = <<~RUBY
     require "net/http"
     require "json"
     require "fileutils"
+    require "open3"
     require "base64"
     require "digest"
     require "rbconfig"
@@ -87,9 +66,9 @@ template = <<~RUBY
     FileUtils.mkdir_p(CLI_DIR)
 
     payload = DATA.read
-    if !File.exist?(LIBRARY_PATH) ||
-        File.size(LIBRARY_PATH) != #{library_size} ||
-        Digest::SHA256.file(LIBRARY_PATH).hexdigest != #{library_digest.dump}
+    expected_digest = #{library_digest.dump}
+    unless File.file?(LIBRARY_PATH) &&
+           Digest::SHA256.file(LIBRARY_PATH).hexdigest == expected_digest
       File.binwrite(LIBRARY_PATH, Base64.decode64(payload))
       if RUBY_PLATFORM =~ /darwin/
         system("codesign", "-s", "-", "-f", LIBRARY_PATH,
@@ -97,14 +76,19 @@ template = <<~RUBY
       end
     end
 
+    ENV["SCARPE_TUI_LIB"] = LIBRARY_PATH
+
   #{mylib_src}
   #{scarpe_tui_src}
   #{app_src}
 
-  rescue Exception => e
+  rescue StandardError => e
     log_file = File.expand_path("~/.scarpe_ai/error.log")
     FileUtils.mkdir_p(File.dirname(log_file))
-    File.write(log_file, "\#{e.class}: \#{e.message}\\n\#{e.backtrace.join("\\n")}")
+    File.write(
+      log_file,
+      "\#{e.class}: \#{e.message}\\n\#{Array(e.backtrace).join("\\n")}"
+    )
     puts "Scarpe AI encountered a fatal error."
     puts "Check the log file at: \#{log_file}"
   end
@@ -115,6 +99,6 @@ RUBY
 
 output_path = File.join(ROOT, "scarpe")
 File.write(output_path, template)
-FileUtils.chmod("+x", output_path)
+FileUtils.chmod(0o700, output_path)
 
 puts "Executable 'scarpe' generated successfully!"

@@ -77,14 +77,17 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
             if p.empty? || k.empty? || m.empty? || c.empty?
               error_msg.text = "Please fill in all fields."
             else
-              File.write(config_file, JSON.pretty_generate({
-                "provider" => p,
-                "api_key" => k,
-                "model" => m,
-                "theme_color" => c,
-                "require_file_consent" => req_file,
-                "require_bash_consent" => req_bash
-              }))
+              File.open(config_file, File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |file|
+                file.write(JSON.pretty_generate({
+                  "provider" => p,
+                  "api_key" => k,
+                  "model" => m,
+                  "theme_color" => c,
+                  "require_file_consent" => req_file,
+                  "require_bash_consent" => req_bash
+                }))
+              end
+              File.chmod(0o600, config_file)
               quit
             end
           end
@@ -104,7 +107,7 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
   end
 end
 
-ENV['API_KEY'] = config["api_key"]
+api_key = config["api_key"]
 model_name = config["model"]
 provider = config["provider"]
 theme_color = config["theme_color"] || "cyan"
@@ -116,6 +119,27 @@ safe_command_env = {
   "HOME" => ENV.fetch("HOME", ""),
   "LANG" => ENV.fetch("LANG", "C.UTF-8")
 }.freeze
+
+workspace_root = File.realpath(Dir.pwd)
+
+def safe_workspace_path(workspace_root, requested_path)
+  path = requested_path.to_s.strip
+  raise ArgumentError, "file path must not be empty" if path.empty?
+
+  candidate = File.expand_path(path, workspace_root)
+  root = workspace_root.end_with?(File::SEPARATOR) ? workspace_root : "#{workspace_root}#{File::SEPARATOR}"
+  unless candidate == workspace_root || candidate.start_with?(root)
+    raise ArgumentError, "file path must stay inside the current workspace"
+  end
+  candidate
+end
+
+def write_private_file(path, content)
+  File.open(path, File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |file|
+    file.write(content)
+  end
+  File.chmod(0o600, path)
+end
 
 history_file = File.expand_path("~/.scarpe_ai_history.json")
 messages = []
@@ -234,7 +258,7 @@ Scarpe.app(true, title: "Scarpe AI") do
       end
 
       messages << { "role" => "user", "content" => user_text }
-      File.write(history_file, JSON.pretty_generate(messages))
+      write_private_file(history_file, JSON.pretty_generate(messages))
 
       append_to(chat_history_id) do
         border stroke: theme_color do
@@ -288,7 +312,8 @@ Scarpe.app(true, title: "Scarpe AI") do
                 "https://openrouter.ai/api/v1/chat/completions"
             )
             request = Net::HTTP::Post.new(uri)
-            request["Authorization"] = "Bearer " + config.fetch("api_key")
+            request["x-goog-api-key"] = api_key
+            request["Authorization"] = "Bearer #{api_key}"
             provider_messages = []
             provider_messages << system_message if system_message
             provider_messages.concat(conversation)
@@ -302,7 +327,7 @@ Scarpe.app(true, title: "Scarpe AI") do
           when "anthropic"
             uri = URI("https://api.anthropic.com/v1/messages")
             request = Net::HTTP::Post.new(uri)
-            request["x-api-key"] = config.fetch("api_key")
+            request["x-api-key"] = api_key
             request["anthropic-version"] = "2023-06-01"
 
             anthropic_messages = conversation.drop_while do |message|
@@ -324,7 +349,7 @@ Scarpe.app(true, title: "Scarpe AI") do
               "v1beta/models/#{model_name}:streamGenerateContent?alt=sse"
             )
             request = Net::HTTP::Post.new(uri)
-            request["x-goog-api-key"] = config.fetch("api_key")
+            request["x-goog-api-key"] = api_key
 
             gemini_messages = conversation.map do |message|
               {
@@ -401,7 +426,7 @@ Scarpe.app(true, title: "Scarpe AI") do
         end
 
         messages << { "role" => "assistant", "content" => ai_full_response }
-        File.write(history_file, JSON.pretty_generate(messages))
+        write_private_file(history_file, JSON.pretty_generate(messages))
 
         ai_full_response.scan(/<write_file path="([^"]+)">(.*?)<\/write_file>/m).each do |path, content|
           if require_file_consent
@@ -414,9 +439,10 @@ Scarpe.app(true, title: "Scarpe AI") do
                   flow do
                     button "Allow", stroke: "white", fill: "dark_green" do
                       begin
-                        dir = File.dirname(path)
+                        safe_path = safe_workspace_path(workspace_root, path)
+                        dir = File.dirname(safe_path)
                         FileUtils.mkdir_p(dir) unless Dir.exist?(dir)
-                        File.write(path, content.strip)
+                        write_private_file(safe_path, content.strip)
                         status_msg.text = "File saved successfully."
                       rescue StandardError => e
                         status_msg.text = "Error: #{e.message}"
@@ -435,11 +461,12 @@ Scarpe.app(true, title: "Scarpe AI") do
             end
           else
             begin
-              dir = File.dirname(path)
+              safe_path = safe_workspace_path(workspace_root, path)
+              dir = File.dirname(safe_path)
               FileUtils.mkdir_p(dir) unless Dir.exist?(dir)
-              File.write(path, content.strip)
+              write_private_file(safe_path, content.strip)
               append_to(chat_history_id) do
-                para "System: File #{path} saved automatically.", stroke: "green"
+                para "System: File #{safe_path} saved automatically.", stroke: "green"
               end
             rescue StandardError => e
               append_to(chat_history_id) do
@@ -479,7 +506,7 @@ Scarpe.app(true, title: "Scarpe AI") do
                         end
 
                         messages << { "role" => "user", "content" => "System observation - Bash execution result for `#{cmd}`:\n#{output}" }
-                        File.write(history_file, JSON.pretty_generate(messages))
+                        write_private_file(history_file, JSON.pretty_generate(messages))
                       rescue StandardError => e
                         status_msg.text = "Error: #{e.message}"
                       end
@@ -512,7 +539,7 @@ Scarpe.app(true, title: "Scarpe AI") do
               end
 
               messages << { "role" => "user", "content" => "System observation - Bash execution result for `#{cmd}`:\n#{output}" }
-              File.write(history_file, JSON.pretty_generate(messages))
+              write_private_file(history_file, JSON.pretty_generate(messages))
             rescue StandardError => e
               append_to(chat_history_id) do
                 para "System: Error executing #{cmd} - #{e.message}", stroke: "red"

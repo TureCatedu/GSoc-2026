@@ -271,7 +271,7 @@ module Scarpe
         ruby_string = str_ptr.read_string
         return ruby_string
       ensure
-        ScarpeTuiBackend.scarpe_tui_free_string(str_ptr.address)
+        ScarpeTuiBackend.scarpe_tui_free_string(str_ptr)
       end
     end
 
