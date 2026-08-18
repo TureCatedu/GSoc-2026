@@ -99,3 +99,10 @@ The output appears in the chat once the command finishes.
 ---
 
 Scarpe AI combines the power of multiple LLM providers with direct file‑system access, all from a comfortable terminal UI.
+
+## License and third-party components
+
+Scarpe TUI is distributed under the MIT License; see [LICENSE](LICENSE).
+
+The Ruby-to-Rust native interface uses the Ruby `ffi` gem. FFX is not part of
+this repository and is not required by the build or runtime.

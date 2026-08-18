@@ -26,13 +26,13 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
     file_consent_input = nil
     bash_consent_input = nil
     error_msg = nil
-    
+
     border stroke: "blue" do
       stack do
         para " SCARPE AI - SETUP ", stroke: "white", fill: "blue", modifier: "bold"
         para ""
       end
-      
+
       scroll_area max_height: 18 do
         para "Provider (openai, anthropic, gemini, openrouter):", stroke: "light_gray"
         provider_input = edit_line(config["provider"] || "openai", stroke: "white")
@@ -41,7 +41,7 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
         para "API Key:", stroke: "light_gray"
         api_input = edit_line(config["api_key"] || "", stroke: "white")
         para ""
-        
+
         para "Model:", stroke: "light_gray"
         model_input = edit_line(config["model"] || "gpt-4o", stroke: "white")
         para ""
@@ -49,7 +49,7 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
         para "Theme Color (cyan, green, magenta, yellow, white):", stroke: "light_gray"
         color_input = edit_line(config["theme_color"] || "cyan", stroke: "white")
         para ""
-        
+
         para "Require File Write Confirmation (yes/no):", stroke: "light_gray"
         file_consent_val = config.fetch("require_file_consent", true) ? "yes" : "no"
         file_consent_input = edit_line(file_consent_val, stroke: "white")
@@ -59,10 +59,10 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
         bash_consent_val = config.fetch("require_bash_consent", true) ? "yes" : "no"
         bash_consent_input = edit_line(bash_consent_val, stroke: "white")
         para ""
-        
+
         error_msg = para "", stroke: "red"
       end
-      
+
       dock_bottom do
         para " "
         flow do
@@ -73,14 +73,14 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
             c = color_input.text.strip
             req_file = file_consent_input.text.strip.downcase != "no"
             req_bash = bash_consent_input.text.strip.downcase != "no"
-            
+
             if p.empty? || k.empty? || m.empty? || c.empty?
               error_msg.text = "Please fill in all fields."
             else
-              File.write(config_file, JSON.pretty_generate({ 
-                "provider" => p, 
-                "api_key" => k, 
-                "model" => m, 
+              File.write(config_file, JSON.pretty_generate({
+                "provider" => p,
+                "api_key" => k,
+                "model" => m,
                 "theme_color" => c,
                 "require_file_consent" => req_file,
                 "require_bash_consent" => req_bash
@@ -96,7 +96,7 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
       end
     end
   end
-  
+
   if File.exist?(config_file)
     config = JSON.parse(File.read(config_file))
   else
@@ -111,24 +111,44 @@ theme_color = config["theme_color"] || "cyan"
 require_file_consent = config.fetch("require_file_consent", true)
 require_bash_consent = config.fetch("require_bash_consent", true)
 
+safe_command_env = {
+  "PATH" => ENV.fetch("PATH", ""),
+  "HOME" => ENV.fetch("HOME", ""),
+  "LANG" => ENV.fetch("LANG", "C.UTF-8")
+}.freeze
+
 history_file = File.expand_path("~/.scarpe_ai_history.json")
 messages = []
 
 system_prompt = <<~PROMPT
-  You are a software engineer integrated into a CLI.
-  You have access to the local file system.
-  You can read files if the user explicitly asks you to.
+  You are an expert AI software engineer integrated directly into the user's terminal CLI.
+  You DO NOT have a simulated environment. You are running natively on the user's machine.
   
-  If you need to create or modify a file, you MUST use exactly this XML syntax:
-  <write_file path="path/to/file.ext">
-  code...
+  CRITICAL RULES FOR ACTING ON THE SYSTEM:
+  You must NEVER say "I cannot run commands" or "I cannot write files". You HAVE the tools to do so.
+  To use these tools, you MUST wrap your output in the specific XML tags defined below.
+  Do not use markdown blocks (```bash) to execute commands. ONLY use the XML tags.
+
+  TOOL 1: WRITE OR MODIFY FILES
+  If you need to create, update, or write code to a file, use exactly this syntax:
+  <write_file path="/absolute/or/relative/path/to/file.ext">
+  print("Hello World")
   </write_file>
-  
-  If you need to execute shell commands (e.g., mkdir, mv, ls, npm install), you MUST use exactly this XML syntax:
+
+  TOOL 2: EXECUTE BASH COMMANDS
+  If you need to move files, create directories, run scripts, or perform any terminal action, use exactly this syntax:
   <execute_bash>
-  command...
+  mkdir -p /path/to/dir && mv file.txt /path/to/dir/
   </execute_bash>
+
+  When the user asks you to do something, simply execute it using the tools. Do not ask for permission, the system handles it.
 PROMPT
+
+def build_provider_context(messages, limit: 20)
+  system_message = messages.find { |message| message["role"] == "system" }
+  conversation = messages.reject { |message| message["role"] == "system" }.last(limit)
+  [system_message, conversation]
+end
 
 if File.exist?(history_file)
   begin
@@ -140,12 +160,14 @@ end
 
 if messages.empty? || messages.first["role"] != "system"
   messages.unshift({ "role" => "system", "content" => system_prompt.strip })
+else
+  messages.first["content"] = system_prompt.strip
 end
 
 Scarpe.app(true, title: "Scarpe AI") do
   prompt_input = nil
   chat_history_id = nil
-  
+
   send_logic = proc do
     user_text = prompt_input.text.strip
     if !user_text.empty?
@@ -170,14 +192,14 @@ Scarpe.app(true, title: "Scarpe AI") do
       display_text = user_text
       if user_text.start_with?("/read ")
         file_path = user_text.sub("/read ", "").strip
-        
+
         if File.directory?(file_path)
           ignore_dirs = [".git", "node_modules", "target", "build", "vendor", "dist", ".next", ".idea"]
-          
-          files = Dir.glob("#{file_path}/**/*").reject do |f| 
+
+          files = Dir.glob("#{file_path}/**/*").reject do |f|
             File.directory?(f) || ignore_dirs.any? { |ig| f.include?("/#{ig}/") || f.start_with?("#{ig}/") }
           end
-          
+
           file_contents = files.map do |f|
             if File.size(f) > 150_000
               "--- File: #{f} ---\n[Skipped: File too large (>150KB)]\n"
@@ -194,7 +216,7 @@ Scarpe.app(true, title: "Scarpe AI") do
               end
             end
           end.join("\n")
-          
+
           user_text = "I have analyzed the directory `#{file_path}`. Here are the files:\n\n#{file_contents}\n\nYou can modify or create files (even in new subdirectories)."
           display_text = "Command: Read directory #{file_path} (#{files.count} files)"
         elsif File.exist?(file_path)
@@ -223,9 +245,9 @@ Scarpe.app(true, title: "Scarpe AI") do
           end
         end
       end
-      
-      prompt_input.text = "" 
-      
+
+      prompt_input.text = ""
+
       ai_node = nil
       append_to(chat_history_id) do
         border stroke: "dark_gray" do
@@ -241,7 +263,7 @@ Scarpe.app(true, title: "Scarpe AI") do
         current_text = ""
         ai_full_response = ""
         first_token_received = false
-        
+
         spinner_thread = Thread.new do
           frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
           i = 0
@@ -251,39 +273,72 @@ Scarpe.app(true, title: "Scarpe AI") do
             sleep 0.08
           end
         end
-        
+
         uri = nil
         request = nil
-        
+
         begin
+          system_message, conversation = build_provider_context(messages, limit: 20)
+
           case provider
-          when "openai"
-            uri = URI("https://api.openai.com/v1/chat/completions")
+          when "openai", "openrouter"
+            uri = URI(
+              provider == "openai" ?
+                "https://api.openai.com/v1/chat/completions" :
+                "https://openrouter.ai/api/v1/chat/completions"
+            )
             request = Net::HTTP::Post.new(uri)
-            request['Authorization'] = "Bearer #{ENV['API_KEY']}"
-            request.body = { model: model_name, messages: messages.last(20), stream: true }.to_json
-          when "openrouter"
-            uri = URI("https://openrouter.ai/api/v1/chat/completions")
-            request = Net::HTTP::Post.new(uri)
-            request['Authorization'] = "Bearer #{ENV['API_KEY']}"
-            request.body = { model: model_name, messages: messages.last(20), stream: true }.to_json
+            request["Authorization"] = "Bearer " + config.fetch("api_key")
+            provider_messages = []
+            provider_messages << system_message if system_message
+            provider_messages.concat(conversation)
+
+            request.body = {
+              model: model_name,
+              messages: provider_messages,
+              stream: true
+            }.to_json
+
           when "anthropic"
             uri = URI("https://api.anthropic.com/v1/messages")
             request = Net::HTTP::Post.new(uri)
-            request['x-api-key'] = ENV['API_KEY']
-            request['anthropic-version'] = '2023-06-01'
-            request.body = { model: model_name, max_tokens: 4096, messages: messages.last(20), stream: true }.to_json
-          when "gemini"
-            uri = URI("https://generativelanguage.googleapis.com/v1beta/models/#{model_name}:streamGenerateContent?alt=sse&key=#{ENV['API_KEY']}")
-            request = Net::HTTP::Post.new(uri)
-            gemini_msgs = messages.last(20).reject { |m| m["role"] == "system" }.map do |msg|
-              { "role" => msg["role"] == "assistant" ? "model" : "user", "parts" => [{ "text" => msg["content"] }] }
+            request["x-api-key"] = config.fetch("api_key")
+            request["anthropic-version"] = "2023-06-01"
+
+            anthropic_messages = conversation.drop_while do |message|
+              message["role"] != "user"
             end
-            
-            sys_msg = messages.find { |m| m["role"] == "system" }
-            body_hash = { contents: gemini_msgs }
-            body_hash[:system_instruction] = { parts: [{ text: sys_msg["content"] }] } if sys_msg
-            
+
+            anthropic_body = {
+              model: model_name,
+              max_tokens: 4096,
+              messages: anthropic_messages,
+              stream: true
+            }
+            anthropic_body[:system] = system_message["content"] if system_message
+            request.body = anthropic_body.to_json
+
+          when "gemini"
+            uri = URI(
+              "https://generativelanguage.googleapis.com/" \
+              "v1beta/models/#{model_name}:streamGenerateContent?alt=sse"
+            )
+            request = Net::HTTP::Post.new(uri)
+            request["x-goog-api-key"] = config.fetch("api_key")
+
+            gemini_messages = conversation.map do |message|
+              {
+                "role" => message["role"] == "assistant" ? "model" : "user",
+                "parts" => [{ "text" => message["content"] }]
+              }
+            end
+
+            body_hash = { contents: gemini_messages }
+            if system_message
+              body_hash[:system_instruction] = {
+                parts: [{ text: system_message["content"] }]
+              }
+            end
             request.body = body_hash.to_json
           end
 
@@ -298,11 +353,11 @@ Scarpe.app(true, title: "Scarpe AI") do
                     if line.start_with?("data: ") && line != "data: [DONE]"
                       data_str = line.sub("data: ", "").strip
                       next if data_str.empty?
-                      
+
                       begin
                         json = JSON.parse(data_str)
                         content = nil
-                        
+
                         case provider
                         when "openai", "openrouter"
                           content = json.dig("choices", 0, "delta", "content")
@@ -344,7 +399,7 @@ Scarpe.app(true, title: "Scarpe AI") do
           ai_full_response = "[Network Error] #{e.message}"
           ai_node.text = current_text + ai_full_response
         end
-        
+
         messages << { "role" => "assistant", "content" => ai_full_response }
         File.write(history_file, JSON.pretty_generate(messages))
 
@@ -355,7 +410,7 @@ Scarpe.app(true, title: "Scarpe AI") do
                 stack do
                   para " The AI wants to create/modify: #{path} ", stroke: "black", fill: "yellow", modifier: "bold"
                   status_msg = para "Waiting for confirmation...", stroke: "light_gray"
-                  
+
                   flow do
                     button "Allow", stroke: "white", fill: "dark_green" do
                       begin
@@ -403,16 +458,16 @@ Scarpe.app(true, title: "Scarpe AI") do
                   para " The AI wants to execute: ", stroke: "black", fill: "yellow", modifier: "bold"
                   para cmd, stroke: "white"
                   status_msg = para "Waiting for confirmation...", stroke: "light_gray"
-                  
+
                   flow do
                     button "Allow", stroke: "white", fill: "dark_green" do
                       begin
-                        stdout, stderr, _status = Open3.capture3(cmd)
+                        stdout, stderr, _status = Open3.capture3(safe_command_env, cmd, unsetenv_others: true)
                         output = stdout.strip.empty? ? stderr.strip : stdout.strip
                         output = "Success (no output)." if output.empty?
-                        
+
                         status_msg.text = "Execution completed."
-                        
+
                         append_to(chat_history_id) do
                           border stroke: "dark_gray" do
                             stack do
@@ -422,7 +477,7 @@ Scarpe.app(true, title: "Scarpe AI") do
                             end
                           end
                         end
-                        
+
                         messages << { "role" => "user", "content" => "System observation - Bash execution result for `#{cmd}`:\n#{output}" }
                         File.write(history_file, JSON.pretty_generate(messages))
                       rescue StandardError => e
@@ -442,10 +497,10 @@ Scarpe.app(true, title: "Scarpe AI") do
             end
           else
             begin
-              stdout, stderr, _status = Open3.capture3(cmd)
+              stdout, stderr, _status = Open3.capture3(safe_command_env, cmd, unsetenv_others: true)
               output = stdout.strip.empty? ? stderr.strip : stdout.strip
               output = "Success (no output)." if output.empty?
-              
+
               append_to(chat_history_id) do
                 border stroke: "dark_gray" do
                   stack do
@@ -455,7 +510,7 @@ Scarpe.app(true, title: "Scarpe AI") do
                   end
                 end
               end
-              
+
               messages << { "role" => "user", "content" => "System observation - Bash execution result for `#{cmd}`:\n#{output}" }
               File.write(history_file, JSON.pretty_generate(messages))
             rescue StandardError => e
@@ -479,16 +534,16 @@ Scarpe.app(true, title: "Scarpe AI") do
   chat_history_id = scroll_area max_height: 0 do
     messages.each do |msg|
       next if msg["role"] == "system"
-      
+
       is_user = msg["role"] == "user"
       b_stroke = is_user ? theme_color : "dark_gray"
       bg_color = is_user ? theme_color : "dark_gray"
       label = is_user ? " USER " : " AI "
-      
+
       border stroke: b_stroke do
         stack do
           para label, stroke: "white", fill: bg_color, modifier: "bold"
-          
+
           if msg["content"].start_with?("I have read the file") || msg["content"].start_with?("I have analyzed the directory")
             para "Command: Read operation completed.", stroke: "light_gray"
           elsif msg["content"].start_with?("System observation - Bash execution result")
