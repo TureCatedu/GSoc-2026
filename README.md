@@ -95,7 +95,6 @@ scarpe            # start chatting
 │  examples/app.rb        ← AI chat application    │
 │  lib/scarpe_tui.rb      ← Shoes‑like TUI         │
 │  ext/mylib.rb           ← FFI bindings to Rust   │
-│  ext/ffx.rb             ← FFI→C transpiler       │
 │  rust_core/             ← Terminal engine        │
 │    ├── lib.rs           ← data structures        │
 │    ├── ffi.rs           ← C ABI exports          │
@@ -135,18 +134,6 @@ scroll_to_end
 ```
 
 These commands move the active scroll area to the beginning or end. Scroll areas clamp their offset to the available content and render a vertical track and thumb when the content exceeds the viewport.
-
-### FFX (`ext/ffx.rb`)
-
-An experimental transpiler that converts Ruby FFI definitions into **C extensions** with JIT‑friendly trampolines.
-It shadows the `ffi` gem and emits a C source file where each function has an `_impl` variant and an `_asm` trampoline containing:
-
-- A jump to the implementation
-- Magic bytes `0x46464930`
-- Argument count & type‑byte sequence
-- The function name (null‑terminated)
-
-This enables a ZJIT to **inline FFI calls** at runtime by scanning the compiled `.so` for those signatures.
 
 ### CLI builder (`build_cli.rb`)
 
@@ -206,7 +193,6 @@ The Ruby layer raises typed exceptions for FFI failures:
 ├── examples/
 │   └── app.rb                # Main AI chat application
 ├── ext/
-│   ├── ffx.rb                # FFI‑to‑C transpiler
 │   └── mylib.rb              # FFI bindings to Rust
 ├── header/
 │   └── scarpe_tui_header.c   # C header for Rust lib
