@@ -13,7 +13,7 @@ Integrates multiple LLM providers (OpenAI, Anthropic, Gemini, OpenRouter) into a
 ## ✨ Features
 
 - **Multi-provider AI** – OpenAI, Anthropic (Claude), Google Gemini, OpenRouter
-- **Rich TUI** – scrollable chat history, buttons, checkboxes, bordered panels, customisable theme
+- **Rich TUI** – scrollable chat history with a visible scrollbar, buttons, checkboxes, bordered panels, and a customisable theme
 - **Tool use** – AI can read local files, write new files, and run shell commands
 - **Consent controls** – optionally require confirmation before file writes or bash execution
 - **Streaming** – token-by-token responses in real time
@@ -43,7 +43,7 @@ cd rust_core && cargo build --release && cd ..
 ruby examples/app.rb --setup
 ```
 
-The wizard asks for your provider, API key, model, theme colour, and consent preferences. Settings are saved to `~/.scarpe_ai_config.json`.
+The wizard asks for your provider, API key, model, theme colour, and consent preferences. Consent options use native checkboxes and are persisted as booleans. Settings are saved to `~/.scarpe_ai_config.json`.
 
 ### 2. Run
 
@@ -81,9 +81,10 @@ scarpe            # start chatting
 |-----|--------|
 | `Esc` / `Ctrl+C` | Quit |
 | `Tab` | Switch focus between input fields |
-| `↑` `↓` `PgUp` `PgDn` | Scroll |
+| `↑` `↓` `Page Up` `Page Down` | Scroll the active view |
 | `Enter` | Submit (single-line) |
 | `Shift+Enter` | New line (in the multi-line edit box) |
+| Mouse wheel | Scroll the active scroll area |
 
 ---
 
@@ -105,9 +106,9 @@ scarpe            # start chatting
 
 ### Rust core (`rust_core/`)
 
-A terminal rendering engine built on [`crossterm`](https://crates.io/crates/crossterm).  
-It holds a virtual DOM (stack, flow, text, buttons, checkboxes, borders, scroll areas, …), computes layout and **diff‑renders** only changed cells.  
-All functions are exposed through a **C ABI** (`scarpe_tui_*`) so they can be called from any language via FFI.
+A terminal rendering engine built on [`crossterm`](https://crates.io/crates/crossterm).
+It holds a virtual DOM (stack, flow, text, buttons, checkboxes, borders, scroll areas, …), computes layout, clips scroll-area children to their viewport, draws the scrollbar above the clipped region, and **diff‑renders** only changed cells.
+All functions are exposed through a **C ABI** (`scarpe_tui_*`) so they can be called from any language via FFI. The scrolling command is exported as `scarpe_tui_scroll_to`, supporting movement to the start or end of the active scrollable view.
 
 ### Scarpe TUI (`lib/scarpe_tui.rb`)
 
@@ -126,9 +127,18 @@ end
 
 **Widgets:** `stack`, `flow`, `border`, `scroll_area`, `dock_bottom`, `para`, `button`, `edit_line`, `edit_box`, `checkbox`.
 
+Scrollable views expose programmatic controls for callbacks and actions:
+
+```ruby
+scroll_to_start
+scroll_to_end
+```
+
+These commands move the active scroll area to the beginning or end. Scroll areas clamp their offset to the available content and render a vertical track and thumb when the content exceeds the viewport.
+
 ### FFX (`ext/ffx.rb`)
 
-An experimental transpiler that converts Ruby FFI definitions into **C extensions** with JIT‑friendly trampolines.  
+An experimental transpiler that converts Ruby FFI definitions into **C extensions** with JIT‑friendly trampolines.
 It shadows the `ffi` gem and emits a C source file where each function has an `_impl` variant and an `_asm` trampoline containing:
 
 - A jump to the implementation
@@ -178,7 +188,7 @@ All settings live in `~/.scarpe_ai_config.json`:
 
 ## 🐞 Error handling
 
-Crashes are logged to `~/.scarpe_ai/error.log`.  
+Crashes are logged to `~/.scarpe_ai/error.log`.
 The Ruby layer raises typed exceptions for FFI failures:
 
 - `RustPanicError`
