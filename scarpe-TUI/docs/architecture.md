@@ -30,6 +30,7 @@ The project supports both development (running Ruby files directly) and a bundle
 - Defines the `Scarpe` module and `App` class.
 - The `App` class owns the UI state, manages the node stack (for building the hierarchy), and stores callbacks.
 - DSL methods (`stack`, `flow`, `border`, `para`, `edit_line`, `edit_box`, `button`, `checkbox`, `dock_bottom`, `scroll_area`) create nodes in the Rust core and link them to the current parent.
+- Scrolling helpers (`scroll_to_start` and `scroll_to_end`) call the Rust scroll command through FFI and are usable from callbacks.
 - The `run_loop` method repeatedly polls the Rust core for events, dispatches button clicks/submissions, and triggers rendering.
 
 #### Node stack
@@ -82,7 +83,7 @@ Layout computation is recursive. The root is laid out at position `(0,0)` with t
 - `Flow`: children placed horizontally, wrapping to a new row when needed.
 - `Border`: adds 1 cell of padding on all sides.
 - `DockBottom`: positions children at the bottom of the terminal, regardless of their place in the tree.
-- `ScrollArea`: computes content height, clamps scroll offset, and provides a clipping rectangle for children.
+- `ScrollArea`: computes content height, clamps scroll offset, provides a clipping rectangle for children, and renders a vertical scrollbar track/thumb when needed.
 - `Text`, `Button`, `EditLine`, `EditBox`: compute dimensions based on text length and wrapping.
 
 #### Rendering
@@ -92,15 +93,17 @@ Rendering uses a double buffer (`current_buffer` and `next_buffer`). Each frame:
 1. Layouts are recomputed if needed.
 2. The next buffer is cleared.
 3. All nodes are drawn recursively into the next buffer, respecting clipping regions for scroll areas.
-4. The two buffers are compared cell-by-cell; only changed cells are written to the terminal.
-5. Buffers are swapped.
+4. Scroll areas draw their scrollbar after clipped children so the track/thumb remains visible inside the viewport.
+5. The two buffers are compared cell-by-cell; only changed cells are written to the terminal.
+6. Buffers are swapped.
 
 #### Input handling
 
 Crossterm events are read in a separate thread and sent over an `mpsc` channel. The `scarpe_tui_poll_events` function drains the channel and processes:
 
-- Keyboard: navigation (arrows, page up/down, tab), text input, Enter submissions, Esc/Ctrl+C to quit.
+- Keyboard: navigation (arrows, Page Up/Page Down, tab), text input, Enter submissions, Esc/Ctrl+C to quit.
 - Mouse: click on buttons/checkboxes/edit fields, scroll wheel for scroll areas.
+- Programmatic controls: Ruby callbacks can move the active scroll area to the start or end through `scroll_to_start` and `scroll_to_end`.
 - Resize: marks redraw.
 
 The function returns:
@@ -136,3 +139,5 @@ The Ruby `App#handle_rust_status!` translates these into appropriate Ruby except
 - Chat history is stored in `~/.scarpe_ai_history.json`.
 - The AI app uses these files to maintain state across runs.
 - The setup UI is shown if configuration is missing or `--setup` is passed.
+- Setup confirmation preferences are native checkboxes and are persisted as boolean values.
+- The setup scroll area is sized to keep the provider prompt visible when the form opens.

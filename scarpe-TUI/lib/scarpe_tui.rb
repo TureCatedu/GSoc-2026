@@ -61,6 +61,10 @@ module Scarpe
     def checked?
       @app.get_checkbox_state(@id)
     end
+
+    def checked=(value)
+      @app.set_checkbox_state(@id, value)
+    end
   end
 
   # Represents a text node in the TUI, allowing for dynamic updates to its content.
@@ -257,6 +261,18 @@ module Scarpe
       @node_stack.pop
     end
 
+    # Moves the current scrollable chat area to its first visible line.
+    def scroll_to_start
+      status = ScarpeTuiBackend.scarpe_tui_scroll_to(@ctx_ptr, false)
+      handle_rust_status!(status)
+    end
+
+    # Moves the current scrollable chat area to its last visible line.
+    def scroll_to_end
+      status = ScarpeTuiBackend.scarpe_tui_scroll_to(@ctx_ptr, true)
+      handle_rust_status!(status)
+    end
+
     # Signals the application to quit.
     def quit
       @should_quit = true
@@ -280,6 +296,11 @@ module Scarpe
       status = ScarpeTuiBackend.scarpe_tui_get_checkbox_state(@ctx_ptr, node_id)
       handle_rust_status!(status)
       status == 1
+    end
+
+    def set_checkbox_state(node_id, checked)
+      status = ScarpeTuiBackend.scarpe_tui_set_checkbox_state(@ctx_ptr, node_id, !!checked)
+      handle_rust_status!(status)
     end
 
     # Applies styling to a node using the Rust backend.

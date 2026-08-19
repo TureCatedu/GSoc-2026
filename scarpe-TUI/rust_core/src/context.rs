@@ -1,5 +1,5 @@
 use crate::*;
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::cursor::{Hide, MoveTo, SetCursorStyle, Show};
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::style::{
     Attribute, Color, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
@@ -81,6 +81,7 @@ impl ScarpeTuiContext {
             stdout().execute(Clear(ClearType::All))?; // Clear the screen
         }
 
+        self.cursor_pos = None; // Recomputed from the focused edit line
         self.next_buffer.reset(); // Clear the next buffer
         self.compute_layouts(); // Compute the layout of all nodes
         self.initial_scroll_done = true;
@@ -91,6 +92,7 @@ impl ScarpeTuiContext {
         }
 
         let mut out = stdout(); // Get the terminal output handle
+        out.queue(Hide)?; // Prevent the old caret from covering redraws
         let mut current_fg = Color::Reset; // Track the current foreground color
         let mut current_bg = Color::Reset; // Track the current background color
         let mut current_attr = Attribute::Reset; // Track the current text attributes
@@ -134,8 +136,11 @@ impl ScarpeTuiContext {
 
         out.queue(ResetColor)?; // Reset terminal colors
 
-        // Position the blinking cursor after rendering
+        // Use the terminal's bar cursor. Unlike a block cursor, it does not
+        // cover the glyph in the current cell, so it is displayed between
+        // characters exactly like a conventional text editor caret.
         if let Some((cx, cy)) = self.cursor_pos {
+            out.queue(SetCursorStyle::SteadyBar)?;
             out.queue(MoveTo(cx, cy))?;
             out.queue(Show)?;
         } else {
@@ -181,7 +186,10 @@ impl ScarpeTuiContext {
             }
             NodeType::Flow => self.layout_flow(children, start_x, start_y, max_width),
             NodeType::Border => self.layout_border(children, start_x, start_y, max_width),
-            NodeType::Checkbox(_) => (3, 1),
+            NodeType::Checkbox { ref text, .. } => {
+                let width = text.chars().count().saturating_add(4) as u16;
+                (width.min(max_width).max(3), 1)
+            }
             NodeType::Text(ref text)
             | NodeType::EditLine(ref text)
             | NodeType::Button(ref text) => self.layout_simple_text(&node_type, text, max_width),
@@ -725,11 +733,12 @@ impl ScarpeTuiContext {
                     NodeType::Button(_) => {
                         clicked_btn = Some(id);
                     }
-                    NodeType::Checkbox(checked) => {
+                    NodeType::Checkbox { checked: _, .. } => {
                         if let Some(node) = self.nodes.get_mut(id) {
-                            if let NodeType::Checkbox(ref mut state) = node.node_type {
-                                *state = !checked;
+                            if let NodeType::Checkbox { checked: state, .. } = &mut node.node_type {
+                                *state = !*state;
                                 state_changed = true;
+                                clicked_btn = Some(id);
                             }
                         }
                     }
@@ -804,8 +813,8 @@ impl ScarpeTuiContext {
             NodeType::Button(ref text) => {
                 self.draw_button(text, &layout, current_offset, style, current_clip)
             }
-            NodeType::Checkbox(checked) => {
-                self.draw_checkbox(checked, &layout, current_offset, style, current_clip)
+            NodeType::Checkbox { ref text, checked } => {
+                self.draw_checkbox(text, checked, &layout, current_offset, style, current_clip)
             }
             NodeType::Border => self.draw_border(&layout, current_offset, style, current_clip),
             NodeType::EditBox(ref text) => {
@@ -978,42 +987,45 @@ impl ScarpeTuiContext {
         style: NodeStyle,
         clip: Option<(i32, i32, i32, i32)>,
     ) {
-        // Draws an editable single-line text field with a prefix and cursor handling.
-        let mut cursor_x = layout.x as i32;
-        let cursor_y = layout.y as i32 - offset_y;
+        // The prompt occupies two cells: '>' and the following space.
+        let start_x = layout.x as i32;
+        let text_x = start_x + 2;
+        let y = layout.y as i32 - offset_y;
         let max_x = (layout.x + layout.width) as i32;
 
         self.next_buffer
-            .set_char_clamped(cursor_x, cursor_y, '>', style, clip);
-        cursor_x += 2;
+            .set_char_clamped(start_x, y, '>', style, clip);
+        self.next_buffer
+            .set_char_clamped(start_x + 1, y, ' ', style, clip);
 
-        let cursor_byte = cursor.unwrap_or(text.len()).min(text.len());
-        for (index, ch) in text.char_indices() {
-            if cursor_x < max_x {
-                self.next_buffer
-                    .set_char_clamped(cursor_x, cursor_y, ch, style, clip);
-                cursor_x += 1;
-            }
-            if index + ch.len_utf8() >= cursor_byte {
+        // The editor cursor is a byte offset, but it is always a UTF-8
+        // character boundary. Draw every character independently of it.
+        for (column, ch) in text.chars().enumerate() {
+            let x = text_x + column as i32;
+            if x >= max_x {
                 break;
             }
-        }
-        if cursor_byte == 0 {
-            cursor_x = layout.x as i32 + 2;
+            self.next_buffer.set_char_clamped(x, y, ch, style, clip);
         }
 
-        // Saves the cursor position for later rendering if the node is focused.
-        if Some(id) == self.focused_node {
-            if cursor_y >= 0 && cursor_y < self.next_buffer.height as i32 {
-                let mut show_cursor = true;
-                if let Some((cx1, cy1, cx2, cy2)) = clip {
-                    if cursor_x < cx1 || cursor_x >= cx2 || cursor_y < cy1 || cursor_y >= cy2 {
-                        show_cursor = false;
-                    }
-                }
-                if show_cursor {
-                    self.cursor_pos = Some((cursor_x as u16, cursor_y as u16));
-                }
+        let cursor_byte = cursor.unwrap_or(text.len()).min(text.len());
+        let cursor_column = text[..cursor_byte].chars().count() as i32;
+        let cursor_x = text_x + cursor_column;
+
+        // Keep the terminal cursor at the insertion point. It is hidden in
+        // render(), so it cannot erase/cover the character following the
+        // insertion point.
+        if Some(id) == self.focused_node
+            && y >= 0
+            && y < self.next_buffer.height as i32
+            && cursor_x >= 0
+            && cursor_x < self.next_buffer.width as i32
+        {
+            let visible = clip.map_or(true, |(x1, y1, x2, y2)| {
+                cursor_x >= x1 && cursor_x < x2 && y >= y1 && y < y2
+            });
+            if visible {
+                self.cursor_pos = Some((cursor_x as u16, y as u16));
             }
         }
     }
@@ -1054,6 +1066,7 @@ impl ScarpeTuiContext {
 
     fn draw_checkbox(
         &mut self,
+        text: &str,
         checked: bool,
         layout: &ComputedLayout,
         offset_y: i32,
@@ -1071,6 +1084,17 @@ impl ScarpeTuiContext {
             .set_char_clamped(cursor_x + 1, cursor_y, mark, style, clip);
         self.next_buffer
             .set_char_clamped(cursor_x + 2, cursor_y, ']', style, clip);
+        self.next_buffer
+            .set_char_clamped(cursor_x + 3, cursor_y, ' ', style, clip);
+        for (index, ch) in text.chars().enumerate() {
+            self.next_buffer.set_char_clamped(
+                cursor_x + 4 + index as i32,
+                cursor_y,
+                ch,
+                style,
+                clip,
+            );
+        }
     }
 
     fn draw_border(

@@ -33,7 +33,10 @@ pub enum NodeType {
     EditLine(String),
     EditBox(String),
     Button(String),
-    Checkbox(bool),
+    Checkbox {
+        text: String,
+        checked: bool,
+    },
     Border,
     DockBottom,
     ScrollArea {

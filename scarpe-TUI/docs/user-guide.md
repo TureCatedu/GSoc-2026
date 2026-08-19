@@ -22,10 +22,12 @@ On first launch, a setup screen appears. Fill in:
 - **API Key**: your provider API key
 - **Model**: model name (e.g., `gpt-4o`)
 - **Theme Color**: `cyan`, `green`, `magenta`, `yellow`, or `white`
-- **File Write Confirmation**: `yes` or `no`
-- **Bash Exec Confirmation**: `yes` or `no`
+- **Require File Write Confirmation**: toggle the checkbox to ask before the AI creates or modifies files
+- **Require Bash Exec Confirmation**: toggle the checkbox to ask before the AI executes shell commands
 
-Click **SAVE** to store the configuration. The configuration is saved to `~/.scarpe_ai_config.json`.
+The setup screen uses native checkboxes for the two confirmation options. Click a checkbox to toggle it, then click **SAVE**. Settings are saved to `~/.scarpe_ai_config.json` as boolean values (`true` or `false`).
+
+The provider prompt is visible when the setup screen opens. Use the setup screen's scroll behavior if the terminal is too small to display all fields.
 
 ## Main Screen
 
@@ -41,7 +43,7 @@ The main UI consists of:
 2. Press **Enter** (or click **Send**) to send.
 3. The AI streams its response token by token.
 
-Use **Shift+Enter** to insert a newline in the edit box.
+Use **Shift+Enter** to insert a newline in the edit box. While an editor is focused, `Up` and `Down` retain their normal cursor/navigation behavior.
 
 ## Special Commands
 
@@ -71,13 +73,14 @@ If confirmation is disabled, the command runs automatically and the output appea
 
 ## Keyboard Shortcuts
 
-| Key                  | Action                          |
-|----------------------|---------------------------------|
-| `Esc` / `Ctrl+C`     | Quit                            |
-| `Tab`                | Cycle focus between input fields |
-| `↑` / `↓`           | Scroll conversation up/down     |
-| `PgUp` / `PgDn`     | Scroll conversation by 5 lines  |
-| `Shift+Enter`        | New line in the edit box        |
+| Key | Action |
+|-----|--------|
+| `Esc` / `Ctrl+C` | Quit |
+| `Tab` | Cycle focus between input fields |
+| `Up` / `Down` | Move through text when an editor is focused; otherwise scroll the current scrollable view |
+| `Page Up` | Scroll toward the beginning of the current scrollable view |
+| `Page Down` | Scroll toward the end of the current scrollable view |
+| `Shift+Enter` | New line in the edit box |
 
 ## Mouse Support
 
@@ -98,11 +101,11 @@ The theme color is used for user message borders, header background, send button
 
 ## Files
 
-| File                          | Purpose                                    |
-|-------------------------------|--------------------------------------------|
-| `~/.scarpe_ai_config.json`    | Provider, API key, model, preferences      |
-| `~/.scarpe_ai_history.json`   | Full chat message history (including system prompt) |
-| `~/.scarpe_ai/error.log`      | Fatal error log for the bundled executable |
+| File | Purpose |
+|------|---------|
+| `~/.scarpe_ai_config.json` | Provider, API key, model, preferences |
+| `~/.scarpe_ai_history.json` | Full chat message history (including system prompt) |
+| `~/.scarpe_ai/error.log` | Fatal error log for the bundled executable |
 | `~/.scarpe_ai/librust_core.dylib` | Extracted Rust library for the bundled executable |
 
 ## Tips

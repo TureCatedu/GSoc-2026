@@ -67,7 +67,19 @@ pub extern "C" fn scarpe_tui_create_node(
                 };
                 NodeType::Button(text_content)
             }
-            6 => NodeType::Checkbox(false),
+            6 => {
+                let text_content = if !text_ptr.is_null() {
+                    unsafe { CStr::from_ptr(text_ptr) }
+                        .to_string_lossy()
+                        .into_owned()
+                } else {
+                    String::new()
+                };
+                NodeType::Checkbox {
+                    text: text_content,
+                    checked: false,
+                }
+            }
             7 => NodeType::Border,
             8 => {
                 let text_content = if !text_ptr.is_null() {
@@ -271,8 +283,33 @@ pub extern "C" fn scarpe_tui_get_checkbox_state(
     let result = catch_unwind(|| {
         let ctx = unsafe { &mut *ctx_ptr };
         if let Some(node) = ctx.nodes.get(node_id as usize) {
-            if let NodeType::Checkbox(state) = node.node_type {
-                return if state { 1 } else { 0 };
+            if let NodeType::Checkbox { checked, .. } = node.node_type {
+                return if checked { 1 } else { 0 };
+            }
+        }
+        -1
+    });
+    result.unwrap_or(-1)
+}
+
+/// Sets the checked state of a checkbox.
+/// Returns 0 on success and -1 for invalid arguments or node IDs.
+#[no_mangle]
+pub extern "C" fn scarpe_tui_set_checkbox_state(
+    ctx_ptr: *mut ScarpeTuiContext,
+    node_id: c_int,
+    checked: bool,
+) -> c_int {
+    if ctx_ptr.is_null() || node_id < 0 {
+        return -1;
+    }
+    let result = catch_unwind(|| {
+        let ctx = unsafe { &mut *ctx_ptr };
+        if let Some(node) = ctx.nodes.get_mut(node_id as usize) {
+            if let NodeType::Checkbox { checked: state, .. } = &mut node.node_type {
+                *state = checked;
+                ctx.needs_redraw = true;
+                return 0;
             }
         }
         -1
@@ -362,6 +399,27 @@ pub extern "C" fn scarpe_tui_update_text(
     result.unwrap_or(STATUS_ERR_PANIC) // Handle panics gracefully
 }
 
+/// Moves the active scroll area to the beginning or end.
+#[no_mangle]
+pub extern "C" fn scarpe_tui_scroll_to(ctx_ptr: *mut ScarpeTuiContext, bottom: bool) -> c_int {
+    if ctx_ptr.is_null() {
+        return STATUS_ERR_NULL_PTR;
+    }
+
+    let result = catch_unwind(|| {
+        let ctx = unsafe { &mut *ctx_ptr };
+        if ctx.scroll_to(bottom) {
+            ctx.needs_redraw = true;
+        }
+        STATUS_OK
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => STATUS_ERR_PANIC,
+    }
+}
+
 /// Polls for user input events (keyboard and mouse) and updates the TUI context accordingly.
 /// Handles events such as key presses, mouse clicks, and scroll actions.
 /// Returns a status code indicating the result of the event handling.
@@ -399,23 +457,25 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                         break;
                     }
 
+                    let focused_text_input = ctx
+                        .focused_node
+                        .and_then(|id| ctx.nodes.get(id))
+                        .map(|node| {
+                            matches!(node.node_type, NodeType::EditLine(_) | NodeType::EditBox(_))
+                        })
+                        .unwrap_or(false);
+
                     match key_event.code {
-                        KeyCode::Up => {
+                        KeyCode::Up if !focused_text_input => {
                             state_changed |= ctx.scroll_by(-1);
                         }
-                        KeyCode::Down => {
+                        KeyCode::Down if !focused_text_input => {
                             state_changed |= ctx.scroll_by(1);
                         }
                         KeyCode::PageUp => {
-                            state_changed |= ctx.scroll_by(-5);
-                        }
-                        KeyCode::PageDown => {
-                            state_changed |= ctx.scroll_by(5);
-                        }
-                        KeyCode::Home => {
                             state_changed |= ctx.scroll_to(false);
                         }
-                        KeyCode::End => {
+                        KeyCode::PageDown => {
                             state_changed |= ctx.scroll_to(true);
                         }
                         KeyCode::Tab => {
@@ -543,10 +603,12 @@ pub extern "C" fn scarpe_tui_poll_events(ctx_ptr: *mut ScarpeTuiContext) -> c_in
                         let (changed, btn_id) = ctx.handle_mouse(mx, my, click, scroll_dir);
                         if changed {
                             state_changed = true;
+                            ctx.needs_redraw = true;
                         }
                         if let Some(id) = btn_id {
                             ctx.clicked_button = Some(id);
                             ctx.scroll_offset_y = 0;
+                            ctx.needs_redraw = true;
                             return 2;
                         }
                     }

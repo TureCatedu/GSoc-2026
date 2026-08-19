@@ -26,7 +26,7 @@ During DSL block evaluation, the following methods are available:
 | `flow(&block)`  | Horizontal flow with wrapping. |
 | `border(stroke:, fill:, modifier:, &block)` | Container with box-drawing border; adds 1-cell padding. |
 | `dock_bottom(&block)` | Container fixed to the bottom of the screen. |
-| `scroll_area(max_height:, stroke:, fill:, modifier:, &block)` | Scrollable container with optional max height. |
+| `scroll_area(max_height:, stroke:, fill:, modifier:, &block)` | Scrollable container with optional max height. A `max_height` of `0` fills the remaining available height. |
 | `append_to(parent_id, &block)` | Evaluates a block with the node stack set to `parent_id`, allowing dynamic addition to existing nodes. |
 
 #### Leaf Nodes
@@ -37,7 +37,7 @@ During DSL block evaluation, the following methods are available:
 | `edit_line(initial_text, stroke:, fill:, modifier:, &block)` | Single-line input. Optional block called on Enter. | `EditLine` |
 | `edit_box(initial_text, stroke:, fill:, modifier:, &block)` | Multi-line input. Optional block called on Enter (without Shift). | `EditBox` |
 | `button(text, stroke:, fill:, modifier:, &block)` | Clickable button. Optional block called on click. | nil |
-| `checkbox([text], stroke:, fill:, modifier:, &block)` | Checkbox. Optional block called on toggle. | `Checkbox` |
+| `checkbox([text], stroke:, fill:, modifier:, &block)` | Native checkbox with boolean state. Optional block called on toggle. | `Checkbox` |
 
 #### Other Application Methods
 
@@ -47,15 +47,28 @@ During DSL block evaluation, the following methods are available:
 | `get_node_text(node_id)` | Returns the text of an `EditLine` or `EditBox` node. |
 | `update_node_text(node_id, new_text)` | Updates the text of a node. |
 | `get_checkbox_state(node_id)` | Returns `true`/`false` for a checkbox. |
+| `scroll_to_start` | Moves the active scrollable view to the beginning. |
+| `scroll_to_end` | Moves the active scrollable view to the end. |
 
 ### Nested Helper Classes
 
-| Class       | Methods                       | Description                          |
-|-------------|-------------------------------|--------------------------------------|
-| `EditLine`  | `#text`, `#text=`             | Gets/sets the text of the edit line. |
-| `EditBox`   | `#text`, `#text=`             | Gets/sets the text of the edit box.  |
-| `Checkbox`  | `#checked?`                   | Returns whether the checkbox is checked. |
-| `TextNode`  | `#text=`                      | Updates the text of a text node.     |
+| Class | Methods | Description |
+|-------|---------|-------------|
+| `EditLine` | `#text`, `#text=` | Gets/sets the text of the edit line. |
+| `EditBox` | `#text`, `#text=` | Gets/sets the text of the edit box. |
+| `Checkbox` | `#checked?` | Returns whether the checkbox is checked. |
+| `TextNode` | `#text=` | Updates the text of a text node. |
+
+### Scrolling Behavior
+
+`scroll_area` clips content to its viewport and supports vertical scrolling.
+
+- `Up` and `Down` scroll a scrollable view when no text editor is focused.
+- `Page Up` moves toward the beginning of the view.
+- `Page Down` moves toward the end of the view.
+- The mouse wheel scrolls the view under the pointer.
+- When `edit_line` or `edit_box` is focused, `Up` and `Down` retain their normal text-editing behavior.
+- Scroll areas render a compact vertical track and thumb when their content exceeds the viewport.
 
 ### Constants
 
@@ -102,6 +115,7 @@ attach_function :scarpe_tui_get_text, [:pointer, :int], :pointer
 attach_function :scarpe_tui_free_string, [:uint64], :void
 attach_function :scarpe_tui_get_clicked_button, [:pointer], :int
 attach_function :scarpe_tui_get_checkbox_state, [:pointer, :int], :int
+attach_function :scarpe_tui_scroll_to, [:pointer, :bool], :int
 attach_function :scarpe_tui_set_style, [:pointer, :int, :int, :int, :int], :int
 attach_function :scarpe_tui_update_text, [:pointer, :int, :string], :int
 ```
@@ -120,6 +134,7 @@ attach_function :scarpe_tui_update_text, [:pointer, :int, :string], :int
 | `scarpe_tui_free_string` | `str_ptr: uint64` | void | Frees a C string allocated by the Rust core. |
 | `scarpe_tui_get_clicked_button` | `ctx_ptr` | int id | Returns the ID of the last clicked button or `-1`. |
 | `scarpe_tui_get_checkbox_state` | `ctx_ptr`, `node_id` | int | Returns `1` if checked, `0` if unchecked, `-1` if invalid. |
+| `scarpe_tui_scroll_to` | `ctx_ptr`, `bottom: bool` | int status | Moves the active scrollable view to the beginning (`false`) or end (`true`). |
 | `scarpe_tui_set_style` | `ctx_ptr`, `node_id`, `fg: int`, `bg: int`, `modifier: int` | int status | Sets foreground color, background color, and modifier for a node. |
 | `scarpe_tui_update_text` | `ctx_ptr`, `node_id`, `new_text: string` | int status | Updates the text of a `Text`, `EditLine`, `EditBox`, or `Button` node. |
 
@@ -127,11 +142,11 @@ attach_function :scarpe_tui_update_text, [:pointer, :int, :string], :int
 
 | Code | Constant | Description |
 |------|----------|-------------|
-| 0    | `STATUS_OK` | Success |
-| -1   | `STATUS_ERR_NULL_PTR` | Null pointer argument |
-| -2   | `STATUS_ERR_PANIC` | Rust panicked |
-| -3   | `STATUS_ERR_IO` | Terminal I/O error |
-| -4   | `STATUS_ERR_INVALID_ID` | Invalid node ID or operation |
+| 0 | `STATUS_OK` | Success |
+| -1 | `STATUS_ERR_NULL_PTR` | Null pointer argument |
+| -2 | `STATUS_ERR_PANIC` | Rust panicked |
+| -3 | `STATUS_ERR_IO` | Terminal I/O error |
+| -4 | `STATUS_ERR_INVALID_ID` | Invalid node ID or operation |
 
 ## Layout Notes
 

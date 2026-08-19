@@ -33,7 +33,8 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
         para ""
       end
 
-      scroll_area max_height: 18 do
+      scroll_area max_height: 22 do
+        para ""
         para "Provider (openai, anthropic, gemini, openrouter):", stroke: "light_gray"
         provider_input = edit_line(config["provider"] || "openai", stroke: "white")
         para ""
@@ -50,14 +51,14 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
         color_input = edit_line(config["theme_color"] || "cyan", stroke: "white")
         para ""
 
-        para "Require File Write Confirmation (yes/no):", stroke: "light_gray"
-        file_consent_val = config.fetch("require_file_consent", true) ? "yes" : "no"
-        file_consent_input = edit_line(file_consent_val, stroke: "white")
+        para "Require File Write Confirmation:", stroke: "light_gray"
+        file_consent_input = checkbox "Ask before creating or modifying files"
+        file_consent_input.checked = config.fetch("require_file_consent", true)
         para ""
 
-        para "Require Bash Exec Confirmation (yes/no):", stroke: "light_gray"
-        bash_consent_val = config.fetch("require_bash_consent", true) ? "yes" : "no"
-        bash_consent_input = edit_line(bash_consent_val, stroke: "white")
+        para "Require Bash Exec Confirmation:", stroke: "light_gray"
+        bash_consent_input = checkbox "Ask before executing shell commands"
+        bash_consent_input.checked = config.fetch("require_bash_consent", true)
         para ""
 
         error_msg = para "", stroke: "red"
@@ -71,8 +72,8 @@ if force_setup || config["api_key"].nil? || config["api_key"].empty? || config["
             k = api_input.text.strip
             m = model_input.text.strip
             c = color_input.text.strip
-            req_file = file_consent_input.text.strip.downcase != "no"
-            req_bash = bash_consent_input.text.strip.downcase != "no"
+            req_file = file_consent_input.checked?
+            req_bash = bash_consent_input.checked?
 
             if p.empty? || k.empty? || m.empty? || c.empty?
               error_msg.text = "Please fill in all fields."
@@ -595,6 +596,12 @@ Scarpe.app(true, title: "Scarpe AI") do
         prompt_input = edit_box("", stroke: "white", &send_logic)
         flow do
           button "Send", stroke: "white", fill: theme_color, &send_logic
+          button "Page Up", stroke: "white", fill: theme_color do
+            scroll_to_start
+          end
+          button "Page Down", stroke: "white", fill: theme_color do
+            scroll_to_end
+          end
           button "Exit", stroke: "white", fill: "dark_red" do
             quit
           end

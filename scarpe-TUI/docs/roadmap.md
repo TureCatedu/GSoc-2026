@@ -11,6 +11,13 @@
 - Inserimento di newline nell'`EditBox` con `Shift+Enter`.
 - Fallback per terminali che espongono la combinazione come `Alt+Enter` o `Ctrl+Enter`.
 - Invio con `Enter` normale.
+- Checkbox native per le impostazioni di consenso nella schermata di setup.
+- Persistenza dei consensi come valori booleani.
+- Scrolling con `Up`/`Down` nelle viste scrollabili quando nessun editor è focalizzato.
+- Scrolling con `Page Up` e `Page Down`.
+- Pulsanti e API Ruby `scroll_to_start` / `scroll_to_end`.
+- Scrollbar verticale con track e thumb nella `ScrollArea`.
+- Setup iniziale con il prompt del provider visibile nella viewport.
 - Test Rust per editor e buffer.
 - Build debug e release verificate.
 - Sintassi Ruby e controllo del diff verificati.
@@ -24,36 +31,39 @@ Consolidamento del percorso di distribuzione:
 3. verificare che il bundle contenga la libreria release aggiornata;
 4. mantenere separati gli artefatti di build dalle modifiche sorgenti.
 
-## Attività futura: scrollbar visibile
+## Stato dello scrolling
 
-La `ScrollArea` supporta già il calcolo dello spazio e lo scrolling, ma la scrollbar visuale non è ancora affidabile nel rendering reale. È registrata come attività futura e non blocca il lavoro corrente.
+Lo scrolling delle `ScrollArea` è completo per il percorso corrente:
 
-L'implementazione futura dovrà coprire:
+- `Up`/`Down` e rotella del mouse modificano l'offset della vista;
+- `Page Up` e `Page Down` portano la vista rispettivamente verso l'inizio e la fine;
+- `scroll_to_start` e `scroll_to_end` espongono lo stesso controllo ai callback Ruby;
+- il rendering disegna una track e un thumb verticali quando il contenuto supera la viewport.
 
-- calcolo della proporzione tra contenuto e viewport;
-- rendering della track e del thumb;
-- aggiornamento del thumb durante tastiera e mouse;
-- clipping corretto dei discendenti annidati;
-- test di layout e rendering con contenuto corto, lungo e annidato.
+Restano possibili miglioramenti UX, come focus più evidente e test aggiuntivi per casi limite di resize e contenuti annidati.
 
 ## Prossime fasi
 
 ### Fase 1 — Distribuzione
+
 - rigenerare il bundle release;
 - verificare il caricamento FFI da sorgente e da bundle;
 - aggiungere una verifica automatica non interattiva del bundle.
 
 ### Fase 2 — Robustezza API
+
 - aggiungere test Ruby per la validazione dei codici di errore FFI;
 - verificare aggiornamento dinamico del testo e callback di submit;
 - controllare gestione shutdown e terminale.
 
 ### Fase 3 — UX TUI
-- completare scrollbar visuale;
+
+- migliorare il feedback visivo della scrollbar e del focus;
 - migliorare focus e feedback visivo;
-- aggiungere test per resize e mouse scrolling.
+- aggiungere test per resize, scrollbar e mouse scrolling.
 
 ### Fase 4 — Qualità e distribuzione
+
 - documentare compatibilità macOS/Linux;
 - automatizzare test e build;
 - ridurre le modifiche non pertinenti prima del commit.
