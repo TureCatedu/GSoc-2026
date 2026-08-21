@@ -1,69 +1,67 @@
-# Scarpe TUI Roadmap
+## Completed
 
-## Completato
+- Rust backend connected to the Ruby DSL through FFI.
+- Two-level terminal buffer and incremental rendering.
+- Recursive layout for root, stack, flow, border, dock bottom, and scroll areas.
+- Keyboard and mouse input.
+- Unicode editing for `EditLine` and `EditBox`.
+- Cursor movement between lines while preserving the vertical column.
+- Newline insertion in `EditBox` with `Shift+Enter`.
+- Fallback support for terminals that report the combination as `Alt+Enter` or `Ctrl+Enter`.
+- Submission with normal `Enter`.
+- Native checkboxes for consent settings on the setup screen.
+- Consent preferences persisted as boolean values.
+- Scrolling with `Up`/`Down` in scrollable views when no editor is focused.
+- Scrolling with `Page Up` and `Page Down`.
+- Ruby buttons and `scroll_to_start` / `scroll_to_end` APIs.
+- Vertical scrollbar with track and thumb in `ScrollArea`.
+- Initial setup with the provider prompt visible.
+- Rust tests for the editor and buffer.
+- Debug and release builds verified.
+- Ruby syntax and diff checks verified.
 
-- Backend Rust collegato alla DSL Ruby tramite FFI.
-- Buffer terminale a doppio livello e rendering incrementale.
-- Layout ricorsivo per root, stack, flow, border, dock bottom e scroll area.
-- Input da tastiera e mouse.
-- Editor Unicode per `EditLine` e `EditBox`.
-- Movimento del cursore tra righe e mantenimento della colonna verticale.
-- Inserimento di newline nell'`EditBox` con `Shift+Enter`.
-- Fallback per terminali che espongono la combinazione come `Alt+Enter` o `Ctrl+Enter`.
-- Invio con `Enter` normale.
-- Checkbox native per le impostazioni di consenso nella schermata di setup.
-- Persistenza dei consensi come valori booleani.
-- Scrolling con `Up`/`Down` nelle viste scrollabili quando nessun editor è focalizzato.
-- Scrolling con `Page Up` e `Page Down`.
-- Pulsanti e API Ruby `scroll_to_start` / `scroll_to_end`.
-- Scrollbar verticale con track e thumb nella `ScrollArea`.
-- Setup iniziale con il prompt del provider visibile nella viewport.
-- Test Rust per editor e buffer.
-- Build debug e release verificate.
-- Sintassi Ruby e controllo del diff verificati.
+## Current Phase
 
-## Fase corrente
+Consolidating the distribution workflow:
 
-Consolidamento del percorso di distribuzione:
+1. Build the Rust backend in release mode.
+2. Regenerate the bundled executable.
+3. Verify that the bundle contains the updated release library.
+4. Keep build artifacts separate from source changes.
 
-1. compilare il backend Rust in release;
-2. rigenerare l'eseguibile bundled;
-3. verificare che il bundle contenga la libreria release aggiornata;
-4. mantenere separati gli artefatti di build dalle modifiche sorgenti.
+## Scrolling Status
 
-## Stato dello scrolling
+Scrolling for `ScrollArea` is complete for the current workflow:
 
-Lo scrolling delle `ScrollArea` è completo per il percorso corrente:
+- `Up`/`Down` and the mouse wheel change the view offset.
+- `Page Up` and `Page Down` move the view to the beginning and end, respectively.
+- `scroll_to_start` and `scroll_to_end` expose the same controls to Ruby callbacks.
+- Rendering draws a track and thumb when the content exceeds the viewport.
 
-- `Up`/`Down` e rotella del mouse modificano l'offset della vista;
-- `Page Up` e `Page Down` portano la vista rispettivamente verso l'inizio e la fine;
-- `scroll_to_start` e `scroll_to_end` espongono lo stesso controllo ai callback Ruby;
-- il rendering disegna una track e un thumb verticali quando il contenuto supera la viewport.
+Potential UX improvements remain, such as clearer focus indicators and additional tests for edge cases involving terminal resizing and nested content.
 
-Restano possibili miglioramenti UX, come focus più evidente e test aggiuntivi per casi limite di resize e contenuti annidati.
+## Next Steps
 
-## Prossime fasi
+### Phase 1 — Distribution
 
-### Fase 1 — Distribuzione
+- Regenerate the release bundle.
+- Verify FFI loading from both source and the bundled executable.
+- Add an automated non-interactive bundle verification step.
 
-- rigenerare il bundle release;
-- verificare il caricamento FFI da sorgente e da bundle;
-- aggiungere una verifica automatica non interattiva del bundle.
+### Phase 2 — API Robustness
 
-### Fase 2 — Robustezza API
+- Add Ruby tests for FFI error-code validation.
+- Verify dynamic text updates and submit callbacks.
+- Review shutdown and terminal restoration behavior.
 
-- aggiungere test Ruby per la validazione dei codici di errore FFI;
-- verificare aggiornamento dinamico del testo e callback di submit;
-- controllare gestione shutdown e terminale.
+### Phase 3 — TUI UX
 
-### Fase 3 — UX TUI
+- Improve scrollbar and focus visual feedback.
+- Improve focus handling and visual feedback.
+- Add tests for terminal resizing, scrollbars, and mouse scrolling.
 
-- migliorare il feedback visivo della scrollbar e del focus;
-- migliorare focus e feedback visivo;
-- aggiungere test per resize, scrollbar e mouse scrolling.
+### Phase 4 — Quality and Distribution
 
-### Fase 4 — Qualità e distribuzione
-
-- documentare compatibilità macOS/Linux;
-- automatizzare test e build;
-- ridurre le modifiche non pertinenti prima del commit.
+- Document macOS and Linux compatibility.
+- Automate testing and builds.
+- Minimize unrelated changes before committing.
