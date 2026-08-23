@@ -400,3 +400,21 @@ When consent is enabled, the user can explicitly allow or reject each requested 
 The system prompt instructs the AI to use only the following XML tool formats:
 
 - `<write_file path="...">...
+
+## Application Demonstration
+
+The following screenshots demonstrate the application in use, from its initial configuration to an AI-assisted development task. Together, they show how the interface guides the user through setup and then supports an interactive conversation with the AI.
+
+### Getting started with the setup page
+
+The setup page is the first point of interaction with the application. It brings the main configuration options together in one place, allowing the user to prepare the AI provider and review the available consent settings before starting a session. This provides a clear and approachable entry point while giving the user control over how the application operates.
+
+![The application setup page, showing the configuration and consent options](docs/images/setup-page.png)
+
+### Exploring an AI-assisted task in the chat page
+
+The chat page demonstrates the application’s central workflow: communicating with the AI through the interface to work on a practical programming task. In this example, the user asks the AI to implement a Python file for viewing the moon phase. The screenshot illustrates how the application can be used not only for conversation, but also for guiding and supporting concrete development work.
+
+![The image showing the AI being asked to implement a Python moon-phase viewer](docs/images/moon-phase.png)
+
+![And the script runned.](docs/images/moon-phase2.png)

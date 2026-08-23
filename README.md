@@ -208,13 +208,3 @@ The Ruby layer raises typed exceptions for FFI failures:
 ├── Gemfile.lock
 └── README.md
 ```
-
----
-
-## 📜 License
-
-This work is licensed under <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/">CC BY-NC-ND 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nd.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">
-
-You are free to share the work as long as you give appropriate credit, do not use it for commercial purposes, and do not make modifications.
-
-Full license: https://creativecommons.org/licenses/by-nc-nd/4.0/
